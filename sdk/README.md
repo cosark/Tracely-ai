@@ -1,0 +1,346 @@
+# `tracely-ai` — instrument agents + the CI gate CLI
+
+Two things in one small package:
+
+1. an **instrumentation SDK** — `tracely.init()` activates the OpenAI/Anthropic/LangChain/LiteLLM auto-instrumentors so your existing code is traced with **zero span code** (the default path); a custom `SpanProcessor` stamps the active `tracely.trace()` run context onto every span — including the zero-touch provider spans. Manual context managers remain the escape hatch. Everything emits standard `gen_ai.*` / OpenInference attributes **plus** Tracely's first-class `tracely.*` hints, so the backend can populate its agent-semantic columns; and
+2. the **`tracely` CLI** — `tracely simulate`, `tracely gate` and `tracely replay`, which turn an agent's behaviour into a pull-request check (exit 0/1 + GitHub status/comment).
+
+The core depends only on `opentelemetry-sdk` + the OTLP HTTP exporter (Python ≥ 3.10); a provider extra adds that provider's auto-instrumentor.
+
+```bash
+pip install "tracely-ai[openai]"   # provider extras: [openai] [anthropic] [langchain] [litellm] [all]
+# or: pip install tracely-ai       # core only (manual API + CLI)
+# import name is `tracely_sdk`; the CLI is `tracely` (entry point tracely_sdk.cli:main)
+```
+
+> Already using OpenTelemetry / OpenInference / LangGraph instrumentation? You don't need the instrumentation half — point your existing OTLP exporter at `POST {endpoint}/v1/traces` with `Authorization: Bearer <ingest-key>` and set the `tracely.*` attributes below. This SDK is just the ergonomic path. The **CLI**, however, is how you wire Tracely into CI.
+
+---
+
+## 1. Instrument an agent
+
+### Automatic (the default — zero span code)
+
+`init()` activates the auto-instrumentors; `trace()` attaches the run context; `@observe` adds
+function-level spans. No manual span code.
+
+```python
+import tracely_sdk as tracely
+from openai import OpenAI
+
+tracely.init(endpoint="http://localhost:8000", api_key="tracely_dev_key",
+             service_name="support-agent", env="prod", instrument="auto")
+
+with tracely.trace(agent="support-agent", conversation="conv-1", user="u_42"):
+    OpenAI().chat.completions.create(model="gpt-4o", messages=[...])   # GENERATION span, captured
+
+@tracely.observe(as_type="agent")            # args→input, return→output, auto-nested
+def plan(goal): ...
+```
+
+Your agent's **name is what you declare** — `service_name` names it by default, `agent=` on `init()` overrides that for the app, `agent=` on `trace()` for one run. It is never guessed from framework attributes: a harness stamps its own `gen_ai.agent.name` on every sub-agent it spins up, which would fill your workspace with agents you never chose. Name neither and every trace lands under one `default` agent. **One codebase, many customers?** Add `trace(tenant=customer_id)`: each tenant becomes its own Agent — endpoint, scenarios, CI gate, failure clusters and regression cases are per-tenant, the traces list shows and filters by it — while `agent=` stays the per-span label ("supervisor", "billing") in the trace's Agent column.
+
+`instrument` is `"auto"` (probes for **openai / anthropic / google / mistral / langchain** and
+activates what's installed — everything else, e.g. `crewai`, `llama-index`, `litellm`, `bedrock`,
+is opt-in), an explicit list (`["openai", "anthropic"]`, honored as-is), or `False`. The
+`tracely.trace()` hints flow onto **every** span inside it — including
+the provider spans the instrumentor creates — via a custom `SpanProcessor`. Streaming token usage
+needs `stream_options={"include_usage": True}`.
+
+### Serving an agent Tracely drives (`traceparent`)
+
+If Tracely calls your agent — `tracely simulate`, a scenario gate, the Emulate tab — it **mints the
+trace id**, sends it as a W3C `traceparent` header, and POSTs its conversation id in the body under
+the endpoint's `session_key`. Honour both and your real trajectory lands inside the turn:
+
+```python
+@app.post("/api/chat")
+def chat(body: dict, request: Request):
+    with tracely.trace(
+        agent="support-agent",
+        conversation=body.get("conversation_id"),          # the endpoint's session_key
+        traceparent=request.headers.get("traceparent"),    # joins Tracely's turn span
+    ):
+        return run_agent(body["message"])
+```
+
+Skip it and the turn is Tracely's own span alone — request in, reply out. Your tool calls still get
+traced, but onto a **separate** trace with a conversation id of your own, so nothing correlates and
+every step/tool-level evaluator has nothing to grade. A header that carries no usable span is logged
+and ignored, never fatal. Already running OTel server instrumentation (FastAPI/Starlette/Flask)? The
+incoming context is ambient — pass `conversation` and leave `traceparent` unset.
+
+**Also covered:** LangChain/LangGraph (`[langchain]` — graphs nest, node names become steps), LiteLLM
+(`instrument=["litellm"]` — 100+ providers via one callback), and a non-patching drop-in
+(`from tracely_sdk.openai import OpenAI` / `wrap_openai`). Under `"auto"`, when the LangChain
+instrumentor is present it owns LLM spans and the provider instrumentors are skipped to avoid
+duplicate spans (override with an explicit list). Full guide: the docs [Automatic instrumentation](https://github.com/Jwuthri/Tracely-ai/blob/master/docs/pages/automatic.mdx) page.
+
+### Manual / custom spans (the escape hatch)
+
+For anything the auto path doesn't cover. Each `with` block is a span; nesting builds the tree.
+
+```python
+import tracely_sdk as tracely
+
+tracely.init(endpoint="http://localhost:8000", api_key="tracely_dev_key",
+             service_name="support-agent", env="prod")
+
+with tracely.agent("support-agent", version="v3", conversation="conv-1", turn=0) as a:  # AGENT span = run root
+    tracely.set_io(a, input=user_msg, output=answer)                 # what the agent received / returned
+    with tracely.thinking(agent="support-agent") as th:             # THINKING span (reasoning)
+        tracely.set_io(th, output=reasoning); tracely.set_usage(th, thinking_tokens=120)
+    with tracely.llm("gpt-4o", agent="support-agent") as g:          # GENERATION span
+        tracely.set_io(g, input=messages, output=completion)
+        tracely.set_usage(g, input_tokens=812, output_tokens=96)
+    with tracely.tool("get_order", agent="support-agent") as t:      # TOOL span
+        try:
+            result = get_order(order_id)
+            tracely.set_io(t, input={"order_id": order_id}, output=result)
+        except Exception as e:
+            tracely.error(t, str(e))                                 # level=ERROR → the failure signal
+
+tracely.flush()   # force-flush the exporter (call before the process exits)
+```
+
+### Span context managers — one per observation type
+| Call | Span type | Sets |
+|---|---|---|
+| `agent(slug, *, version, run_id, role, conversation, turn, user, trace_name, handoff_from, edge="delegate")` | `AGENT` (run root) | `tracely.agent.id`/`.version`/`.run_id`/`.role`, `tracely.conversation.id` + `session.id`, `tracely.turn.index`, `tracely.env`; `user`→`tracely.user.id`, `trace_name`→`tracely.trace.name`; `handoff_from`→ a handoff edge (`caller`→this agent, `edge.type`). |
+| `delegate(to, *, agent, task, edge="delegate")` | `DELEGATE` | the handover itself — `tracely.handoff.caller_agent_id`/`.callee_agent_id`, `tracely.edge.type`; `task`→`tracely.metadata.task`. Open the callee's `agent(...)` inside it. |
+| `llm(model, *, agent, temperature, top_p, max_tokens, frequency_penalty, presence_penalty, seed, tool_calls, metadata)` | `GENERATION` | `gen_ai.request.model` + the sampling params as `gen_ai.request.*`; `tool_calls`→`tracely.tool_calls` (tools the model **requested**); `metadata`→`tracely.metadata.*`. |
+| `tool(name, *, agent)` | `TOOL` | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`. |
+| `skill(name, *, agent, version)` | `SKILL` | a named capability/playbook the agent ran — `tracely.step.name`; `version`→`tracely.metadata.skill_version`. |
+| `thinking(name="thinking", *, agent, model)` | `THINKING` | reasoning emitted as its own span; optional `model`. **Do not wrap the LLM call in it** — see below. |
+| `retriever(name="retrieve", *, agent)` | `RETRIEVER` | a retrieval step — query in `set_io(input=)`, hits in `set_io(output=)`. |
+| `embedding(model, *, agent)` | `EMBEDDING` | `gen_ai.request.model`; record tokens with `set_usage(input_tokens=)`. |
+| `guardrail(name="guardrail", *, agent)` | `GUARDRAIL` | a safety/policy check — verdict in `set_io(output={"action": "allow"\|"block"})`. |
+| `chain(name, *, agent)` | `CHAIN` | a grouping span (e.g. a RAG pipeline) — nest other spans inside it. |
+| `turn(turn_id, *, index)` / `step(name, *, step_id)` | marker / generic | `tracely.turn.*` / `tracely.step.*`. |
+
+#### `thinking()` is a separate step, not a wrapper
+
+`thinking()` is for reasoning your agent does on its own — a planning step, a rule check, a scratchpad
+pass. Putting the model call *inside* it produces a THINKING span and a GENERATION span with the same
+start and the same duration, because there is only one event: the timeline then shows `3.42s` twice
+with no way to tell which spent it.
+
+If the reasoning you want to record is the model's own (an extended-thinking / reasoning model), you
+do not need `thinking()` at all — **stream the call**. The drop-in wrappers
+(`tracely_sdk.openai`, `.anthropic`, `.google`, `.mistral`) keep the span open for the whole stream
+and stamp `tracely.completion_start_time` at the first *content* token, which for a reasoning model
+is precisely where thinking stops and answering starts. The trace shows the split (`0.91s + 0.40s`)
+on the one GENERATION span, and the reasoning text is captured under `output.reasoning`.
+
+```python
+from tracely_sdk.openai import OpenAI
+client = OpenAI()
+for chunk in client.chat.completions.create(model=..., messages=[...], stream=True):
+    ...   # consume normally — the span closes when the stream ends
+```
+
+Non-streamed calls cannot be split: reasoning and output tokens arrive in one response, so no
+wall-clock boundary between them exists to record.
+
+### Annotating spans
+- `set_io(span, *, input=None, output=None)` → `tracely.input` / `tracely.output` (objects are JSON-encoded; message content is a `{role, content:[blocks]}` object or a content-block list).
+- `set_usage(span, *, input_tokens=None, output_tokens=None, thinking_tokens=None, cached_tokens=None, cache_write_tokens=None)` → `gen_ai.usage.input_tokens` / `output_tokens` / `reasoning_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens`.
+- `set_metadata(span, **kv)` → `tracely.metadata.<key>` — arbitrary tags (e.g. prompt version, tenant), surfaced in the span's Metadata and searchable.
+- `set_state(delta, span=None, *, max_bytes=4096)` → `tracely.state.<channel>` — see [Shared state](#shared-state-langgraph-state-scratchpads-stores) below.
+- `error(span, message="")` → marks the span `StatusCode.ERROR` (→ `level=ERROR` in Tracely) — this is *the* failure-detection signal.
+- `flush()` → force-flush the OTLP exporter.
+
+### What Tracely reads
+Standard `gen_ai.*` / OpenInference attributes, plus first-class hints that become **indexed columns** on the span row: `tracely.agent.id`/`.version`/`.run_id`/`.role`, `tracely.user.id`, `tracely.trace.name`, `tracely.conversation.id` (also read from `session.id`), `tracely.turn.id`/`.index`, `tracely.step.id`/`.name`, `tracely.observation.type`, `tracely.tool_calls`, `tracely.handoff.*` + `tracely.edge.type`, the `gen_ai.request.*` sampling params, `gen_ai.usage.*`, `gen_ai.tool.name`/`gen_ai.operation.name`, and `tracely.env` (`prod|staging|ci|dev` — the gating axis). Carried as metadata for specific features: `tracely.agents` (agent catalog), `tracely.state.<channel>` (state panel), `tracely.metadata.<key>` (tags). Agent slug + version are auto-registered into the Postgres registry on ingest.
+
+### Declaring a conversation's agent catalog
+
+Declare the agents and tools a conversation *has* — not just the ones that fired — and the
+**Conversation Agents** panel renders your actual setup: names, descriptions, system prompts,
+models, tool schemas, each tool annotated with how often it really executed. The LLM judge can read
+the same catalog as `@AGENTS`.
+
+```python
+AGENTS = [
+    {
+        "name": "support",
+        "description": "front-line agent; routes billing questions",
+        "system_prompt": "You are the support agent for Acme…",   # free-form keys kept verbatim
+        "model": "gpt-5.2",
+        "tools": {
+            "lookup_order": {"name": "lookup_order", "description": "order by id",
+                             "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}}},
+        },
+    },
+    {"name": "billing", "description": "refunds and charges", "tools": {...}},
+]
+
+with tracely.trace(agent="support", conversation="conv-1", agents=AGENTS):   # stamped on every span
+    ...
+# or pin it to one span: tracely.set_agents(root_span, AGENTS)
+```
+
+Only `name` / `description` / `tools` are interpreted (`tools` is a dict keyed by tool name, or a
+plain list); **any other key** — `system_prompt`, `model`, `guardrails`, `config` — is stored and
+rendered verbatim. Non-Python services can push the same catalog with
+`POST /api/sessions/{conversation_id}/config` (`{"agents": [...]}`). Without a declaration, Tracely
+still derives an observed agent view from the spans; a declared catalog wins when present.
+
+### Shared state (LangGraph `State`, scratchpads, stores)
+
+Harnesses thread one mutable object through the graph. Tracely records the **delta** — the channels a step wrote — never a snapshot: what you debug is *"`plan` was emptied at step 4, in `replan`"*, and re-stamping the whole state on every span bloats the trace for no gain. The **State** drawer on a conversation folds the deltas back into the full object and shows the per-step diff.
+
+**LangGraph needs no code.** A node's return value *is* its channel update, and the LangChain instrumentor already captures it as the span's output; ingest marks those spans `tracely.state_source=output` so the UI reads them as deltas. Just `init(instrument=["langchain"])`.
+
+For state your harness manages itself, call `set_state`. **Scope is the span you attach it to** — the level is already on the span, so there's nothing extra to declare:
+
+```python
+with tracely.step("planner") as s:
+    tracely.set_state({"plan": plan, "retries": 0})   # this step
+```
+
+Each channel becomes its own `tracely.state.<channel>` attribute (not one blob), so a query can read a single channel; values over `max_bytes` are truncated per key so one fat channel can't crowd out the small ones. Within a conversation a "store" is just state that outlives a turn — attach it to the trace's root span instead of a step span.
+
+> The implicit span is the OTel *current* span, which exists inside `step()`/`tool()`/`llm()` but **not** inside an auto-instrumented framework callback — `tracely.trace()` is a context marker rather than an active span, and LangGraph runs node functions with no span in context. A bare `set_state()` inside a LangGraph node warns rather than dropping the write; pass `span=` explicitly there, or just rely on the automatic capture.
+
+---
+
+## 2. Hermetic replay (`call_tool` / `call_llm` / `fixtures`)
+
+These let the **same agent code** run live in production and deterministically offline in CI. Wrap each external call:
+
+```python
+def run(user_input: str):
+    with tracely.agent("support-agent"):
+        # In prod: calls the real fn and records the output. In replay: serves the recorded output.
+        order = tracely.call_tool("get_order", lambda: get_order(order_id), args={"order_id": order_id})
+        answer = tracely.call_llm("gpt-4o", lambda: chat(messages), input=messages, usage=(812, 96))
+        return answer
+```
+
+- **Production (`--live` or no fixtures active):** `call_tool`/`call_llm` invoke your `fn`, record the output (and any error) on the span, and return it.
+- **CI replay:** `tracely replay` activates the case's recorded **fixture bundle** via `with tracely.fixtures(bundle): ...`; `call_tool`/`call_llm` then **serve the recorded outputs in order** (or by `args` match) and never call your `fn`. A call that errored in production is reproduced on the span **and raised as `tracely.ToolError`**, so the agent's own `try/except` runs exactly as it would live — and the gate sees the same failure condition.
+
+**Recorded means recorded — the execution policy (SDK ≥ 0.4.3).** `fixtures(None)` is "no replay requested": everything is live. Any other bundle — including `{}`, an *explicitly empty* recording — is **recorded mode, strict by default**: a call the recording cannot answer raises `tracely.ReplayError` instead of running your `fn`. Its `reason` is one of `missing` (nothing recorded under that name), `exhausted` (every recorded call already served) or `mismatch` (a tool was called with args the recording doesn't have — a different call is never consumed just because the name matches). Matching is explicit and in one place (`_args_match`): an entry recorded without args matches by order; otherwise both sides are canonicalised (JSON strings parsed — ClickHouse hands recorded inputs back as strings — key order and tuple/list ignored) and compared for equality. LLM calls are looked up by model id, falling back to the next recorded LLM call of any name (auto-instrumentor span names ≠ model ids); an LLM whose **input** differs from the recording is still served in order but stamped `tracely.replay.divergence=input` and listed in the report — recorded-model replay tests the orchestration under recorded conditions, and a changed prompt is exactly the divergence it must show, not hide. The block yields a **`ReplayReport`** (`mode` · `served` · `unused` · `diverged` · `live` · `errors` · `providers`; `clean` is true only for a strict run that reproduced the recording exactly); unused recorded calls are reported as divergence evidence, not failed automatically — a legitimate fix can avoid a call. `fixtures(bundle, strict=False)` keeps the pre-0.4.3 lenient behaviour (live fall-through on a miss, ordered serve on a mismatch) for callers migrating; its report says `lenient`, never `recorded`.
+
+**Auto-instrument / drop-in code replays too** (no manual seam required): inside a `fixtures()` block Tracely class-patches the provider's create-method, so code that calls the SDK directly — `client.chat.completions.create(...)` under `instrument="auto"` or the `tracely_sdk.openai` drop-in — is served the recorded completion (reconstructed into a provider-shaped response) and never hits the network, and a strict miss raises `ReplayError` at the call site exactly like `call_llm`. The exact surfaces intercepted — not "the provider":
+
+| Provider | Intercepted entry point | Sync / async | Streaming | Response shape served | Tested against |
+|---|---|---|---|---|---|
+| OpenAI | `chat.completions.create` | both | **no** — `stream=True` is not intercepted and goes live | duck-typed `ChatCompletion` (`choices[0].message.content` / `.tool_calls`; no `usage`/`id`) | real `openai` client (`tests/test_replay_real_providers.py`) |
+| Anthropic | `messages.create` (`system=` folded into the input) | both | **no** — `messages.stream` goes live | duck-typed `Message` (`content` blocks: `text` / `tool_use`; `stop_reason`; no `usage`) | real `anthropic` client |
+| Google GenAI | `models.generate_content` | both | **no** — `generate_content_stream` goes live | duck-typed response (`.text`, `.function_calls`, `candidates[0].content.parts`) | real `google-genai` class when installed, else skipped |
+| Mistral | `chat.complete` / `chat.complete_async` | both | **no** | OpenAI-shaped | stand-in class only (SDK optional) |
+| LiteLLM | `litellm.completion` / `acompletion` | both | **no** | OpenAI-shaped | stand-in module only |
+| Anything else (Responses API, Assistants, Bedrock, Cohere, Ollama, LangChain's own clients, raw HTTP…) | — | — | — | **live in replay** | — |
+
+`ReplayReport.providers` says which of these were actually patched in the process (`patched` / `absent` / `failed: …`). A provider or surface outside the table stays live in replay — the SDK cannot see that call. What catches it is the report: recorded calls the run never asked for (`unused`, also logged as a warning) mean something went to the network instead of being replayed. The SDK does **not** sandbox arbitrary Python or deny egress; a run that needs that guarantee has to deny provider/tool egress in the executor itself. The manual `call_llm` seam remains the way to get provider-agnostic hermetic replay everywhere.
+
+This is what makes replay deterministic, offline, and free (no API keys, no cost). See [regression-testing design](https://github.com/Jwuthri/Tracely-ai/blob/master/design/part2-tracely/05-regression-testing.md).
+
+---
+
+## 3. The CI gate CLI
+
+```bash
+tracely simulate [<agent> | --agent a,b | --all] [--min-pass-rate 0.9] [--max-score-drop 0.1] [--timeout 900] [--github]
+tracely gate     <agent> [--env ci] [--api …] [--key …] [--pr N] [--sha …] [--github]
+tracely replay   <agent> (--entrypoint module:func | --cmd "…") [--live | --lenient] [--github]
+```
+
+- **`tracely simulate`** — drive each agent's enabled **scenarios** (multi-turn conversations, or adversarial goals an attacker model improvises against) at the HTTP endpoint you registered for it, then gate on the result. **No agent code in CI** — Tracely makes the calls, so a TypeScript or Go service gates the same way a Python one does.
+- **`tracely gate <agent>`** — gate a PR against **pre-emitted** `env=ci` traces (your CI already ran the agent and emitted traces); cases are matched to candidates by `input_digest`.
+- **`tracely replay <agent>`** — re-run the agent **on each promoted case's recorded input** (fetched from `GET /api/gate/suite`), then gate. `--entrypoint module:func` calls a Python function per case; `--cmd "…"` runs a shell command per case (gets `TRACELY_INPUT`) that emits its own trace. Strict recorded replay by default: each case line says what actually happened — `[recorded · N served]`, `· diverged` with the evidence underneath (unused recorded calls, inputs that differed, the strict miss), `[replay error: fixtures unavailable]` when the case's recording could not be loaded (the agent is **not** run; the trace is emitted errored so the gate fails loudly), `[lenient · …]` under `--lenient` (legacy live fall-through, reported), or `[live]` under `--live`. `--cmd` runs are always live — fixtures are not injected into an external process — and the CLI says so.
+
+Scenarios belong to an agent, so `simulate` gates one agent, a comma-separated subset, or — with `--all` — every agent that has at least one **enabled** scenario (an agent whose suite is switched off is skipped, not reported untested). Each agent gets its own gate run but they share one commit status and one PR comment, and the job fails if any agent does. `--timeout` budgets the whole command.
+
+**Score drops.** Passing isn't the same as not getting worse: `simulate` also compares every evaluator's mean score, scenario by scenario, against the last green gate's conversations. A drop of `GATE_SCORE_DROP_WARN` (default 0.1) or more is a soft warning; pass `--max-score-drop 0.1` to make it fail the gate. Only evaluators scored on a 0–1 scale are compared, advisory ones never.
+
+All three **exit 0 (PASS) / 1 (FAIL) / 2 (no answer — timeout, unreachable API, or a server-side ERROR run)** and, inside GitHub Actions (or with `--github`), post a **commit status + PR comment** with per-case results and soft warnings (latency/token deltas vs the last green gate). `--dry-run` prints the GitHub calls instead of sending; `--no-github` never touches GitHub. Config via flags or env (`TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT`, `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`; the git ref falls back to `GIT_REF` outside Actions). A `--cmd` subprocess inherits `TRACELY_INPUT` plus `TRACELY_API`/`TRACELY_KEY`/`TRACELY_ENV`, so it can emit traces without hardcoding the endpoint. A reusable composite action lives at `.github/actions/tracely-gate/`.
+
+---
+
+## 4. Export a workspace
+
+```bash
+tracely export [--out dump.ndjson] [--limit N] [--from-ts …] [--to-ts …] [--evals] [--meta KEY=VALUE]
+```
+
+NDJSON — one line per conversation, each line the full object (turns, per-turn steps, scores,
+tokens, cost) that `GET /api/sessions/{thread}/export` returns for a single thread. Streamed and
+paged server-side (`GET /api/export`), so a workspace bigger than memory still exports. Without
+`--out` it goes to stdout and pipes into `jq`; the "wrote …" line goes to stderr so stdout stays
+pure NDJSON. `--meta business_id=2a73…` keeps only conversations whose span metadata carries that
+exact key/value — one tenant's traffic out of a shared workspace.
+
+In Python, the same dump as a generator — nothing is materialised twice, so `break` when you have
+enough:
+
+```python
+import tracely_sdk as tracely
+
+for conv in tracely.export_conversations(limit=100):        # TRACELY_API / TRACELY_KEY
+    print(conv["thread_id"], conv["turns"], conv["cost_usd"])
+
+tracely.download_export("dump.ndjson", from_ts="2026-08-01T00:00:00")   # raw bytes, no re-encode
+```
+
+Content-less 1-turn threads (no input, no output, not failing) are not emitted; `--evals` /
+`evals=True` adds Tracely's own internal runs.
+
+---
+
+## Examples (`sdk/examples/` + `sdk/example.py`)
+
+[`examples/README.md`](examples/README.md) is the full index — **one runnable file per way of
+tracing**, all the same fake-DB **two-agent conversation** (a Support Agent that hands the pricing
+turn off to a Billing Agent, declaring its catalog via `tracely.trace(agents=...)`): each frontier
+provider (OpenAI, Anthropic, Gemini, Mistral, Bedrock) + OpenRouter, each harness (LangChain
+`create_agent`, LangGraph, LiteLLM, LlamaIndex, CrewAI), each first-party agent SDK (OpenAI Agents,
+Claude Agent SDK, Google ADK), and each approach (`@observe`+`trace`, the `wrap_openai`/`wrap_anthropic`
+drop-ins, manual spans). Highlights:
+
+| File | Shows |
+|---|---|
+| `../example.py` | the minimal demo trace (agent → llm → failing tool). `make sdk-example`. |
+| `examples/auto_openai.py` · `auto_anthropic.py` · `auto_gemini.py` · … | **automatic** provider tracing — zero span code (one file per frontier provider + OpenRouter). |
+| `examples/auto_langchain.py` (`create_agent`) · `auto_langgraph.py` · `auto_litellm.py` · … | **automatic** harness tracing (one file per framework, current APIs). |
+| `examples/auto_openai_agents.py` · `auto_claude_agent.py` · `auto_google_adk.py` | **automatic** first-party agent-SDK tracing (OpenAI Agents / Claude Agent SDK / Google ADK). |
+| `examples/auto_agent.py` | **automatic** `@observe` + `trace()` agent → thinking/gen/tool tree. `make auto-agent`. |
+| `examples/dropin_openai.py` · `dropin_anthropic.py` | non-patching `wrap_openai` / `wrap_anthropic` drop-ins. |
+| `examples/manual_spans.py` | the manual escape-hatch API as a full agent (no provider/key needed). |
+| `examples/weather_agent.py` / `weather_agent_cli.py` | a real agent wired with `call_tool`/`call_llm` for `tracely replay --entrypoint` / `--cmd`. |
+| `examples/seed_conversations.py` | rich demo data using **every** SDK helper — single/multi-turn, multi-agent fan-out (1 question → 5 specialists, named skills, sub-agents, declared agent catalogs, shared state), RAG (guardrail→embed→retrieve→chain), thinking, multimodal, structured output, multi-model. `make seed-demo`. |
+| `examples/seed_multiturn.py` | one multi-turn conversation (manual API, no key) — the showcase for the **rolling summary** + **declared agents** (`@AGENTS`). |
+| `examples/seed_regression.py` | promote a failing trace → run red→green CI gates (fills Cases + Gates). `make seed-regression`. |
+| `examples/seed_multicall.py` / `seed_handler.py` | repeated-call + handler examples for fixture replay. |
+
+---
+
+## Releasing
+
+Tagging is the release: `.github/workflows/publish-sdk.yml` runs the SDK tests, builds, smoke-tests
+the **built wheel** in a throwaway venv (a wheel that imports but is missing `delegate`/`skill` is
+the failure this catches), and uploads via PyPI **Trusted Publishing** — no token lives in the repo.
+
+```bash
+# 1. bump `version` in sdk/pyproject.toml, then
+uv lock && git commit -am "chore(sdk): x.y.z" && git push
+# 2. tag it — the workflow refuses a tag that disagrees with pyproject
+git tag sdk-v0.4.1 && git push origin sdk-v0.4.1
+```
+
+`workflow_dispatch` runs everything except the upload, for a dry run.
+
+Publishing from a laptop still works (`uv publish dist-sdk/*`) but needs an API **token** —
+PyPI retired username/password auth, so the username at that prompt is the literal `__token__`.
+
+---
+
+## Key decisions (and why)
+
+1. **Thin wrapper, not a framework.** It only sets attributes on OTel spans — anyone already on OpenTelemetry/OpenInference can skip it and just emit the `tracely.*` hints. No lock-in.
+2. **First-class `tracely.*` hints.** Agent/conversation/turn/step/env are emitted as semantic attributes so they become indexed columns server-side — the basis for agent-level evals and PR gating.
+3. **`THINKING` is a span type, not a field.** Reasoning is its own observation, so it renders distinctly and carries its own token usage.
+4. **Record-replay in the SDK.** `call_tool`/`call_llm` are the seam that makes "the recorded run is the test" real: the same code path records in prod and replays in CI, reproducing recorded errors via `ToolError` so error-handling behaviour is gated faithfully.
+5. **The CLI is the CI contract.** `gate`/`replay` exit 0/1 and speak GitHub — so wiring Tracely into a pipeline is one step, with the hard gate being fail-to-pass and everything else advisory.

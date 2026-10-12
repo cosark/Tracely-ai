@@ -1,0 +1,67 @@
+[project]
+# ponytail: dist name is `tracely-ai` because `tracely` and `tracely-sdk` are both taken
+# on PyPI by unrelated projects. The import name stays `tracely_sdk`.
+name = "tracely-ai"
+version = "0.4.3"
+description = "Tracely Python SDK: automatic + manual agent tracing, exported to Tracely over OTLP."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["llm", "agents", "observability", "tracing", "opentelemetry", "evals"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Monitoring",
+]
+dependencies = [
+  "opentelemetry-sdk>=1.45.0",
+  "opentelemetry-exporter-otlp-proto-http>=1.25",
+]
+
+[project.urls]
+Homepage = "https://tracely-ai.com"
+Documentation = "https://doc.tracely-ai.com"
+Source = "https://github.com/Jwuthri/Tracely-ai"
+Issues = "https://github.com/Jwuthri/Tracely-ai/issues"
+
+[project.optional-dependencies]
+# frontier providers
+openai = ["openinference-instrumentation-openai>=0.1.0"]
+anthropic = ["openinference-instrumentation-anthropic>=2.1.2", "anthropic"]
+google = ["openinference-instrumentation-google-genai>=0.1.0", "google-genai>=2.23.0"]
+mistral = ["openinference-instrumentation-mistralai>=0.1.0", "mistralai>=2.9.4"]
+bedrock = ["openinference-instrumentation-bedrock>=0.1.0"]
+groq = ["openinference-instrumentation-groq>=0.1.0"]
+# harnesses (orchestration frameworks)
+langchain = ["openinference-instrumentation-langchain>=0.1.0"]  # also covers LangGraph
+llama-index = ["openinference-instrumentation-llama-index>=0.1.0", "llama-index"]
+crewai = ["openinference-instrumentation-crewai>=0.1.0", "crewai"]
+litellm = ["litellm>=1.40"]
+# first-party agent SDKs (instrumentor + the SDK itself)
+openai-agents = ["openinference-instrumentation-openai-agents>=2.2.1", "openai-agents"]
+google-adk = ["openinference-instrumentation-google-adk>=0.1.0", "google-adk"]
+claude-agent-sdk = ["openinference-instrumentation-claude-agent-sdk>=0.1.0", "claude-agent-sdk"]  # also needs the Claude Code CLI on PATH
+openrouter = ["langchain-openrouter>=0.1.0"]  # first-party OpenRouter chat model (traced via langchain)
+# non-patching drop-ins — install just the provider SDK (no extra instrumentor needed; tracely_sdk.<provider> wraps the client instance)
+xai = ["openai>=1.0"]                # tracely_sdk.xai — Grok via OpenAI-compatible endpoint
+openrouter-openai = ["openai>=1.0"]  # tracely_sdk.openrouter — OpenAI-compatible drop-in (alt to the langchain path)
+google-genai = ["google-genai>=2.23.0"] # tracely_sdk.google — native google-genai SDK drop-in
+mistral-sdk = ["mistralai>=2.9.4"]     # tracely_sdk.mistral — native mistralai SDK drop-in
+# OpenLLMetry (Traceloop) alternative — init("auto") detects these too
+openllmetry = [
+  "opentelemetry-instrumentation-openai-v2>=2.0b0",
+  "opentelemetry-instrumentation-anthropic>=0.30b0",
+]
+all = ["tracely-ai[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm,openai-agents,google-adk,claude-agent-sdk,openrouter]"]
+
+[project.scripts]
+tracely = "tracely_sdk.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tracely_sdk"]
