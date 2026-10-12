@@ -1,0 +1,126 @@
+"""`Evaluator` ABC + `EvaluatorRegistry` (kind → class dispatch).
+
+Replaces the old `STRUCTURAL = {check_name: callable}` dict + `if/elif kind == 'structural'/'llm_judge'`
+chain. New checks just subclass `Evaluator`, set the two ClassVars, and call
+`register(MyEvaluator)` on the registry.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import ClassVar
+
+from tracely.domain.evaluation.results import EvalResult, RunContext
+
+# Evaluation levels — mirror `EvaluationLevel` in design 00. Kept as module constants (not
+# enums) so the level fields on `EvalResult` / `Evaluator` stay plain strings (the value
+# `ClickHouse` actually stores).
+# Granularity ladder: CONVERSATION (a whole thread, across traces) → AGENT_RUN (one trace/turn)
+# → SPAN/TOOL/GENERATION/CHAIN (one step inside a trace).
+CONVERSATION = "CONVERSATION"
+RUN = "AGENT_RUN"
+SPAN = "SPAN"
+TOOL = "TOOL"
+GENERATION = "GENERATION"
+CHAIN = "CHAIN"
+
+# Levels that address one span (the score's observation_id is the step's span_id).
+STEP_LEVELS = (SPAN, TOOL, GENERATION, CHAIN)
+
+# Reserved config keys — the runtime side-channel from `EvaluationService` to an evaluator.
+# An evaluator's `config` is otherwise exactly what the user saved (one FLAT dict; see
+# `repositories.evaluator_enabled_specs`, which folds the legacy `params` nesting away at load).
+# The service copies a spec's config and injects these per run; they are never persisted:
+CFG_PREVIOUS = "__previous_result__"  # sequential: the previous turn's result of this metric
+CFG_DEPENDENCIES = "__dependencies__"  # depends_on: {score_name: [{span_id, payload}]}
+CFG_CHAIN_PASS = "__chain_pass__"  # this run is an ordered whole-thread pass (evaluate_thread)
+
+
+class Evaluator(ABC):
+    """One online check.
+
+    `kind` matches `Evaluator.kind` in the Postgres row ("structural" | "llm_judge"). `check`
+    is the inner discriminator within a `kind` — for structural evaluators it's
+    `config["check"]` (e.g. `"run_outcome"`, `"tool_success"`). LLM-judge evaluators leave
+    `check` as `None`: a single class handles every LLM-judge config.
+
+    `level` is stamped per-dispatch from the evaluator's DB row (so one class can grade at
+    CONVERSATION / AGENT_RUN / SPAN granularity — the LLM judge branches on it).
+    """
+
+    kind: ClassVar[str]
+    check: ClassVar[str | None] = None
+    default_level: ClassVar[str] = RUN
+
+    def __init__(self) -> None:
+        self.level: str = self.default_level
+        self.score_name: str = ""  # stamped by dispatch() — lets a failing run() log which column it is
+
+    @abstractmethod
+    def run(self, ctx: RunContext, params: dict) -> list[EvalResult]:
+        """Produce zero or more results. The runner stamps `name` and `level` on each result
+        post hoc, so subclasses don't need to set them."""
+
+
+class EvaluatorRegistry:
+    """Resolves `(kind, config.check)` → an Evaluator instance.
+
+    Holds class references (not instances) so each `dispatch` call gets a fresh evaluator —
+    fine for now since evaluators are stateless. If a future evaluator becomes expensive to
+    construct (loaded model, persistent connection) we cache here.
+    """
+
+    def __init__(self) -> None:
+        self._by_key: dict[tuple[str, str | None], type[Evaluator]] = {}
+
+    def register(self, cls: type[Evaluator]) -> type[Evaluator]:
+        self._by_key[(cls.kind, cls.check)] = cls
+        return cls  # so it can be used as a decorator
+
+    def resolve(self, kind: str, check: str | None) -> type[Evaluator] | None:
+        # Try (kind, check) first — needed for structural evaluators that share a kind.
+        cls = self._by_key.get((kind, check))
+        if cls is not None:
+            return cls
+        # Fall back to (kind, None) — used by LLM-judge where `check` isn't meaningful.
+        return self._by_key.get((kind, None))
+
+    def dispatch(
+        self, kind: str, config: dict, score_name: str, level: str, ctx: RunContext
+    ) -> list[EvalResult]:
+        """Run the matching evaluator and stamp results with the evaluator's score name/level.
+
+        `config` reaches the evaluator whole and flat — it used to be narrowed to
+        `config["params"]` when that key existed, which silently stripped the runtime-injected
+        `CFG_*` keys for any row with the legacy nesting. The nesting is now folded away at spec
+        load instead (`repositories.evaluator_enabled_specs`).
+
+        Returns an empty list if no evaluator matches `kind`/`check` (an unknown evaluator
+        kind on a project's row is a soft no-op — better than crashing the runner)."""
+        config = config or {}
+        cls = self.resolve(kind, config.get("check"))
+        if cls is None:
+            return []
+        ev = cls()
+        ev.level = level or cls.default_level
+        ev.score_name = score_name
+        results = ev.run(ctx, config)
+        for r in results:
+            r.name = score_name
+            # Evaluators that emit the generic default get re-stamped with the configured
+            # level; ones that set a specific level themselves (per-span judges, tool checks)
+            # keep it.
+            if level and r.level == RUN:
+                r.level = level
+        return results
+
+
+default_registry = EvaluatorRegistry()
+
+
+def run_evaluator(
+    kind: str, config: dict, score_name: str, level: str, ctx: RunContext
+) -> list[EvalResult]:
+    """Module-level convenience that uses the default registry. The shim at
+    `tracely.evaluators.run_evaluator` re-exports this."""
+    return default_registry.dispatch(kind, config, score_name, level, ctx)

@@ -1,0 +1,201 @@
+"""ClickHouse deletes for the API — the write twin of `async_reader` (same rule: no SQL in routers).
+
+Conversation deletion and the whole-project wipe live here. Uses lightweight `DELETE FROM` (GA
+since CH 23.3): rows are masked from every read immediately, so the UI reflects a delete on the
+next fetch without waiting for a mutation.
+
+Masked is not gone. The rows stay on disk until their part is rewritten, and a big part is never
+merged again on its own — after one workspace wipe prod held 733,788 physical rows behind 1,083
+visible ones, and every query read all of them. `services/purge_service` (right after a wipe) and
+`maintenance.compact_tables` (nightly) are what actually remove them.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from tracely.infrastructure.clickhouse.client import get_async_client, get_client, insert_rows
+from tracely.infrastructure.clickhouse.events_schema import EVENT_COLUMNS, to_rows
+
+
+def delete_trace(project_id: str, trace_id: str, step_names: list[str] | None = None) -> None:
+    """Drop one trace's spans, synchronously — the worker's half of this module.
+
+    Used to *replace* a re-recorded internal run (`Recording.stable`): the recording keeps its
+    trace id, so the previous spans have to go before the new ones land.
+
+    `step_names` narrows that to the evaluator groups being re-recorded (plus the root, which
+    carries no group). One eval trace holds EVERY column graded at that level, and a per-column
+    re-run records only its own — wiping the whole trace erased the other columns' prompts, so the
+    UI could only ever show the judge prompt of whichever column ran last.
+
+    Tombstones, not `DELETE FROM`. A lightweight DELETE is still a ClickHouse *mutation*, and a
+    mutation rewrites every active part of the table — at one per evaluated message that is what
+    "quietly wrecks a table" turns out to mean in practice: prod reached mutation #263,470 with
+    3,008 inactive parts against 11 active ones, and the mark-cache entries for all those dead
+    parts (6.35M of them, for 1.6 MiB of live marks) were the single largest consumer of
+    ClickHouse's RAM.
+
+    So instead: re-insert each doomed row's SORT KEY with `is_deleted = 1` and a fresh `event_ts`.
+    `events` is `ReplacingMergeTree(event_ts, is_deleted)`, so FINAL collapses the pair down to
+    the tombstone and the reads drop it on `is_deleted = 0` — an ordinary batched INSERT, zero
+    mutations. `internal_kind` is carried over because it is what keeps these rows out of the
+    `_REAL` listings; every other column can default, the row is gone.
+
+    The sort key is (project_id, toStartOfMinute(start_time), xxHash32(trace_id), span_id,
+    start_time), so span_id + the EXACT start_time are what the tombstone has to reproduce.
+
+    Reads first, because the common case is that there is nothing there — a first grading.
+    """
+    client = get_client()
+    params = {"p": project_id, "t": trace_id, "n": step_names or []}
+    where = "project_id = {p:String}" + (
+        " AND (step_name IN {n:Array(String)} OR step_name = '')" if step_names else ""
+    )
+    # trace_id in PREWHERE (identical across a row's versions, so safe under FINAL) — without it
+    # this read scanned the whole table on every evaluation. step_name stays in WHERE: a
+    # tombstone does not carry it, so filtering on it before FINAL would split a row's versions.
+    doomed = client.query(
+        f"SELECT span_id, start_time, internal_kind FROM events FINAL "
+        f"PREWHERE trace_id = {{t:String}} WHERE {where} AND is_deleted = 0",
+        parameters=params,
+    ).result_rows
+    if not doomed:
+        return
+    insert_rows(client, "events", EVENT_COLUMNS, to_rows([
+        {
+            "project_id": project_id,
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "start_time": start_time,
+            "internal_kind": internal_kind,
+            "is_deleted": 1,
+        }
+        for span_id, start_time, internal_kind in doomed
+    ]))
+
+
+async def delete_threads(project_id: str, threads: list[str]) -> int:
+    """Delete every trace in these conversation threads, plus their scores. Returns traces removed.
+
+    A "thread" is `conversation_id` when the traces carry one, else the trace_id itself (the
+    definition `sessions_overview` groups by), so both forms are matched. Conversation-level
+    scores hang off `session_id = thread`, turn/span scores off `trace_id`.
+
+    ponytail: leaves the raw OTLP blobs (keyed per ingest batch, not per trace) and any
+    cluster/case rows that reference these traces — cases are promoted regression fixtures with
+    their own S3 bundle, and clusters rebuild. Add a cascade when retention/GDPR needs one.
+    """
+    if not threads:
+        return 0
+    client = await get_async_client()
+    res = await client.query(
+        "SELECT DISTINCT trace_id FROM events WHERE project_id = {p:String} "
+        "AND (conversation_id IN {t:Array(String)} OR trace_id IN {t:Array(String)})",
+        parameters={"p": project_id, "t": threads},
+    )
+    trace_ids = [r[0] for r in res.result_rows]
+    if not trace_ids:
+        return 0
+    params = {"p": project_id, "ids": trace_ids, "t": threads}
+    await client.command(
+        "DELETE FROM events WHERE project_id = {p:String} AND trace_id IN {ids:Array(String)}",
+        parameters=params,
+    )
+    await client.command(
+        "DELETE FROM scores WHERE project_id = {p:String} "
+        "AND (trace_id IN {ids:Array(String)} OR session_id IN {t:Array(String)})",
+        parameters=params,
+    )
+    return len(trace_ids)
+
+
+async def delete_project_events(project_id: str) -> dict[str, int]:
+    """Delete every span and score in a project. Returns the row counts removed.
+
+    Counted before deleting (lightweight DELETE reports no rowcount), so the numbers are what the
+    UI shows back — a concurrent ingest could land a span between the count and the delete, which
+    is fine: the next wipe gets it.
+
+    ponytail: leaves the raw OTLP blobs in S3, same as `delete_threads` — they're keyed per ingest
+    batch, not per project-scan, and re-ingest is idempotent. Empty the bucket if you need it gone.
+    """
+    client = await get_async_client()
+    counts: dict[str, int] = {}
+    for table in ("events", "scores"):
+        res = await client.query(
+            f"SELECT count() FROM {table} WHERE project_id = {{p:String}}",
+            parameters={"p": project_id},
+        )
+        counts[table] = int(res.result_rows[0][0]) if res.result_rows else 0
+        if counts[table]:
+            await client.command(
+                f"DELETE FROM {table} WHERE project_id = {{p:String}}",
+                parameters={"p": project_id},
+            )
+    return {k: v for k, v in counts.items() if v}
+
+
+def delete_expired(project_ids: list[str], days: int) -> int:
+    """Drop spans + scores older than `days` for these projects. Returns spans removed.
+
+    The plan's retention window, enforced nightly (`tracely.enforce_retention`) because the table
+    TTL is one global expression and a plan lives in Postgres. Counted first, same reason as
+    `delete_project_events`: a lightweight DELETE reports no rowcount, and a mutation that matches
+    nothing is still a mutation — this runs over every free workspace, every night.
+
+    `scores` is cut on `created_at` (its own TTL column), so a score written today for a span from
+    last month survives a few extra days. ponytail: cheap and self-correcting — the next sweep
+    takes it — and the alternative is joining scores to events nightly.
+    """
+    if not project_ids or days <= 0:
+        return 0
+    client = get_client()
+    params = {"p": project_ids, "d": days}
+    res = client.query(
+        "SELECT count() FROM events WHERE project_id IN {p:Array(String)} "
+        "AND start_time < now() - INTERVAL {d:UInt32} DAY",
+        parameters=params,
+    )
+    spans = int(res.result_rows[0][0]) if res.result_rows else 0
+    if not spans:
+        return 0
+    client.command(
+        "DELETE FROM events WHERE project_id IN {p:Array(String)} "
+        "AND start_time < now() - INTERVAL {d:UInt32} DAY",
+        parameters=params,
+    )
+    client.command(
+        "DELETE FROM scores WHERE project_id IN {p:Array(String)} "
+        "AND created_at < now() - INTERVAL {d:UInt32} DAY",
+        parameters=params,
+    )
+    return spans
+
+
+def delete_project_rows(project_id: str) -> None:
+    """Mask every span and score of one project — the worker's twin of `delete_project_events`,
+    for the orphan sweep. Masking only; `maintenance.compact_tables` is what takes them off disk.
+    No count first: the sweep only calls this for a project it already found rows or blobs for."""
+    client = get_client()
+    for table in ("events", "scores"):
+        client.command(
+            f"DELETE FROM {table} WHERE project_id = {{p:String}}", parameters={"p": project_id}
+        )
+
+
+def last_write_by_project() -> dict[str, datetime]:
+    """`{project_id: newest event_ts}` across `events` and `scores` — the orphan sweep's guard.
+
+    A deleted workspace cannot receive data (its keys go with it), so a "deleted" project that
+    wrote yesterday means the registry read was wrong, and the sweep must stop rather than act.
+    Masked rows are invisible here, which is the point: a workspace delete masks its rows before
+    the sweep ever sees it."""
+    client = get_client()
+    out: dict[str, datetime] = {}
+    for table in ("events", "scores"):
+        for pid, ts in client.query(
+            f"SELECT project_id, max(event_ts) FROM {table} GROUP BY project_id"
+        ).result_rows:
+            out[pid] = max(ts, out[pid]) if pid in out else ts
+    return out

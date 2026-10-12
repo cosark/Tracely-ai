@@ -1,0 +1,41 @@
+"""OTLP/HTTP traces endpoint. Blob-first ingestion then enqueue (see process_batch)."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
+
+from tracely.api.auth import get_project_id
+from tracely.config import settings
+from tracely.infrastructure.db.session import get_session
+from tracely.services.ingestion_service import ingest_otlp
+from tracely.services.quota_service import quota_gate
+
+router = APIRouter()
+
+
+@router.post("/v1/traces")
+async def otlp_traces(
+    request: Request,
+    project_id: str = Depends(get_project_id),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    # Hosted-cloud quota (no-op unless BILLING_ENABLED): over the plan's monthly cap → 429 with
+    # Retry-After, before we even read the body. Fail-open on any infra error — a quota is a
+    # product limit, not a security boundary, and an outage must not drop customer traces.
+    await quota_gate(project_id, session)
+    # Reject oversized posts BEFORE reading the body into memory (cheap Content-Length pre-check),
+    # then enforce again on the actual bytes in case the header lies / is absent (chunked uploads).
+    limit = settings.max_ingest_bytes
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail="trace payload too large")
+    raw = await request.body()
+    if len(raw) > limit:
+        raise HTTPException(status_code=413, detail="trace payload too large")
+    content_type = request.headers.get("content-type", "application/x-protobuf")
+    # ingest_otlp does sync S3 put + Celery enqueue -> offload from the event loop
+    await run_in_threadpool(ingest_otlp, project_id, content_type, raw)
+    # OTLP success = 200 with an (empty) ExportTraceServiceResponse
+    return Response(status_code=200, media_type="application/x-protobuf", content=b"")
