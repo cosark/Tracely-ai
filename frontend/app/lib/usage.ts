@@ -1,0 +1,150 @@
+// Token + cost usage derivation, shared by the trace table (client) and the detail-page
+// headers (server). Pure functions — no React.
+//
+// Cost isn't traced (no provider puts a price on the wire), so the backend derives it at ingest
+// and stores it on the span — `span.cost` wins wherever it's set. This table is the fallback for
+// rows written before that existed, and it powers the per-direction input/output breakdown. Keep
+// it roughly in step with `backend/tracely/domain/cost.py`, which is the source of truth.
+import type { ConvNode, FullTurn, SpanOut } from "./api";
+
+// Approx public list price, USD per 1M tokens: [input, output]. Matched as a SUBSTRING (not
+// anchored), so OpenRouter's namespaced ids resolve too — e.g. "openai/gpt-4o" hits /gpt-4o/,
+// "anthropic/claude-3.5-sonnet" hits /sonnet/. Open-model rates are rough and route-dependent on
+// OpenRouter; specific patterns must come before general ones (first match wins).
+const PRICES: [RegExp, number, number][] = [
+  [/gpt-5\.?\d*-?nano/, 0.05, 0.4],
+  [/gpt-5\.?\d*-?mini/, 0.25, 2],
+  [/gpt-5/, 1.25, 10],
+  // Must precede /gpt-4o/: without it `gpt-4o-mini` fell through to the full gpt-4o rate and
+  // was priced ~16x its real cost. (A dead `/gpt-5.4-mini/` entry used to sit here too — it was
+  // unreachable behind the gpt-5 mini pattern above, and disagreed with it.)
+  [/gpt-4o-?mini/, 0.15, 0.6],
+  [/gpt-4o/, 2.5, 10],
+  [/gpt-4\.1-nano/, 0.1, 0.4],
+  [/gpt-4\.1-mini/, 0.4, 1.6],
+  [/gpt-4\.1/, 2, 8],
+  [/gpt-4-turbo/, 10, 30],
+  [/gpt-4/, 30, 60],
+  [/gpt-3\.5/, 0.5, 1.5],
+  [/o3|o1/, 15, 60],
+  [/opus/, 15, 75],
+  [/sonnet/, 3, 15],
+  [/haiku/, 0.25, 1.25],
+  [/gemini.*pro/, 1.25, 5],
+  [/gemini/, 0.1, 0.4],
+  [/mistral-large/, 2, 6],
+  [/mistral|mixtral|ministral/, 0.2, 0.6],
+  [/llama.*(405|70)b?/, 0.9, 0.9],
+  [/llama/, 0.2, 0.3],
+  [/deepseek.*(r1|reasoner)/, 0.55, 2.19],
+  [/deepseek/, 0.14, 0.28],
+  [/qwen/, 0.2, 0.6],
+  [/grok/, 2, 10],
+];
+export function rateFor(model: string): [number, number] {
+  const s = model.toLowerCase();
+  for (const [re, i, o] of PRICES) if (re.test(s)) return [i, o];
+  return [0, 0];
+}
+export function round(n: number, d = 6): number {
+  const f = 10 ** d;
+  return Math.round(n * f) / f;
+}
+function pickNum(md: Record<string, string>, keys: string[]): number | undefined {
+  for (const k of keys) {
+    if (md[k] != null) {
+      const n = Number(md[k]);
+      if (!Number.isNaN(n)) return n;
+    }
+  }
+  return undefined;
+}
+export function spanUsage(span: SpanOut): Record<string, number> {
+  const md = span.metadata || {};
+  const u: Record<string, number> = {};
+  // Accept OpenInference's `llm.token_count.*` alongside `gen_ai.usage.*` / OpenLLMetry keys — else
+  // the detail view (which reads per-span metadata) shows no input/output breakdown for LangChain etc.
+  const it = pickNum(md, ["gen_ai.usage.input_tokens", "input_tokens", "prompt_tokens", "llm.token_count.prompt"]);
+  const ot = pickNum(md, ["gen_ai.usage.output_tokens", "output_tokens", "completion_tokens", "llm.token_count.completion"]);
+  const tt = pickNum(md, ["gen_ai.usage.reasoning_tokens", "thinking_tokens", "reasoning_tokens", "llm.token_count.completion_details.reasoning"]);
+  if (it != null) u.input_tokens = it;
+  if (ot != null) u.output_tokens = ot;
+  if (tt != null) u.thinking_tokens = tt;
+  // Prompt-cache breakdown. A subset of the input count on some providers (OpenAI folds cached
+  // reads into prompt_tokens) but *not* others (Anthropic reports them beside input_tokens), so
+  // like thinking_tokens it's surfaced on its own and kept out of the total. Only shown when > 0 —
+  // a cache-enabled call that misses reports 0 on every span.
+  const cr = pickNum(md, ["gen_ai.usage.cache_read_input_tokens", "gen_ai.usage.cached_input_tokens", "cache_read_input_tokens", "cached_tokens", "llm.token_count.prompt_details.cache_read"]);
+  const cw = pickNum(md, ["gen_ai.usage.cache_creation_input_tokens", "cache_creation_input_tokens", "llm.token_count.prompt_details.cache_write"]);
+  if (cr) u.cached_tokens = cr;
+  if (cw) u.cache_write_tokens = cw;
+  // total = input + output (matches the backend token total, which excludes reasoning tokens);
+  // thinking_tokens is surfaced separately.
+  // Trust the input+output breakdown over any stored aggregate: a producer that reports total AND
+  // its components gets them summed into `tokens` (double-count), so prefer it+ot when both exist;
+  // fall back to the aggregate/total only when the components aren't both present.
+  const total =
+    it != null && ot != null
+      ? it + ot
+      : span.tokens || pickNum(md, ["gen_ai.usage.total_tokens", "llm.token_count.total"]) || (it || 0) + (ot || 0);
+  if (total > 0) u.total_tokens = total;
+  const model = md["gen_ai.request.model"] || span.model_id || "";
+  const [ri, ro] = rateFor(model);
+  let ip = pickNum(md, ["input_price", "input_cost"]);
+  let op = pickNum(md, ["output_price", "output_cost"]);
+  if (ip == null && it != null && ri) ip = round((it / 1e6) * ri);
+  if (op == null && ot != null && ro) op = round((ot / 1e6) * ro);
+  if (ip != null) u.input_price = ip;
+  if (op != null) u.output_price = op;
+  const cost = span.cost || (ip || 0) + (op || 0);
+  if (cost > 0) u.cost = round(cost);
+  return u;
+}
+function sumUsages(items: Array<Record<string, number>>): Record<string, number> {
+  const agg: Record<string, number> = {};
+  for (const u of items) for (const k in u) agg[k] = round((agg[k] || 0) + u[k]);
+  return agg;
+}
+// Build a usage breakdown from aggregate token counts + a representative model (prices like spanUsage).
+function usageFrom(it: number, ot: number, total: number, cost: number, model: string): Record<string, number> {
+  const u: Record<string, number> = {};
+  if (it) u.input_tokens = it;
+  if (ot) u.output_tokens = ot;
+  const tot = it && ot ? it + ot : total || it + ot; // prefer the breakdown over a possibly-doubled total
+  if (tot) u.total_tokens = tot;
+  const [ri, ro] = rateFor(model);
+  const ip = it && ri ? round((it / 1e6) * ri) : 0;
+  const op = ot && ro ? round((ot / 1e6) * ro) : 0;
+  if (ip) u.input_price = ip;
+  if (op) u.output_price = op;
+  const c = cost || ip + op;
+  if (c) u.cost = round(c);
+  return u;
+}
+// Turn usage = exact per-span aggregation when steps are loaded, else from the turn's totals.
+export function turnUsage(turn: FullTurn): Record<string, number> {
+  if (turn.spans?.length) {
+    const agg = sumUsages(turn.spans.map(spanUsage));
+    if (Object.keys(agg).length) return agg;
+  }
+  return usageFrom(turn.input_tokens ?? 0, turn.output_tokens ?? 0, turn.tokens, turn.cost, turn.model ?? "");
+}
+// Conversation usage = sum of its turns when loaded, else from the thread's totals.
+export function convUsage(conv: ConvNode): Record<string, number> {
+  if (conv.turnsData?.length) {
+    const agg = sumUsages(conv.turnsData.map(turnUsage));
+    if (Object.keys(agg).length) return agg;
+  }
+  return usageFrom(conv.input_tokens ?? 0, conv.output_tokens ?? 0, conv.tokens, conv.cost, conv.model ?? "");
+}
+export function fmtUsd(n: number): string {
+  if (n === 0) return "$0";
+  return n >= 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(6)}`;
+}
+export function usageSummary(u: Record<string, number>): string {
+  const parts: string[] = [];
+  const tok = u.total_tokens ?? (u.input_tokens || 0) + (u.output_tokens || 0);
+  if (tok) parts.push(`${tok.toLocaleString("en-US")} tok`);
+  if (u.cost) parts.push(fmtUsd(u.cost));
+  return parts.join(" · ") || "usage";
+}
