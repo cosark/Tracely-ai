@@ -14,7 +14,7 @@ const GITHUB = "https://github.com/jwuthri-cloud/Tracely-ai";
 const APP = "/dashboard"; // same app — the authed shell lives in the (app) route group
 const DOCS = "https://doc.tracely-ai.com";
 const LINKEDIN = "https://www.linkedin.com/in/julien-wuthrich-a75156119/";
-const INSTALL = 'pip install "tracelyai[openai]"';
+const INSTALL = 'pip install "tracelyai-sdk[openai]"';
 const API = "https://api.tracely-ai.com"; // the hosted backend — self-hosters swap in their own
 
 /* ---------------------------------- ui bits ---------------------------------- */
@@ -1028,7 +1028,7 @@ export default function Landing() {
               <div className="flex items-center justify-between border-b border-line/70 px-5 py-3">
                 <span className="font-mono text-[11px] text-fg-faint">agent.py</span>
                 <span className="rounded border border-line bg-ink-900 px-2 py-0.5 font-mono text-[10px] text-fg-faint">
-                  pip install &quot;tracelyai[openai]&quot;
+                  pip install &quot;tracelyai-sdk[openai]&quot;
                 </span>
               </div>
               <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.8]">

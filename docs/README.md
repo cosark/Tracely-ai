@@ -1,6 +1,6 @@
 # `docs/` — Tracely SDK documentation site
 
-A [Nextra](https://nextra.site) (Next.js + MDX) site documenting the **`tracelyai`** — how it
+A [Nextra](https://nextra.site) (Next.js + MDX) site documenting the **`tracelyai-sdk`** — how it
 works, how to instrument an agent, the full API reference, hermetic replay, and the CI gate CLI.
 
 ## Run it

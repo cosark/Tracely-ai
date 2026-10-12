@@ -6,7 +6,7 @@ messages, token usage (streaming included), latency, tool calls and errors.
 ## Install with the right extra
 
 ```bash
-pip install "tracelyai[openai]"
+pip install "tracelyai-sdk[openai]"
 ```
 
 | Group | Extras |
@@ -19,7 +19,7 @@ pip install "tracelyai[openai]"
 
 Extras install [OpenInference](https://github.com/Arize-ai/openinference) packages by default.
 [OpenLLMetry](https://github.com/traceloop/openllmetry) is an equivalent alternative that
-`init("auto")` also detects (`pip install "tracelyai[openllmetry]"`); the backend ingests both
+`init("auto")` also detects (`pip install "tracelyai-sdk[openllmetry]"`); the backend ingests both
 conventions independently.
 
 ## `init(...)`
@@ -98,7 +98,7 @@ All four nest into one trace. Use as much or as little as needed.
 ## LangChain & LangGraph
 
 ```bash
-pip install "tracelyai[langchain]"
+pip install "tracelyai-sdk[langchain]"
 ```
 
 Chains, agents and **LangGraph** graphs trace end-to-end; `init()` auto-registers the callback

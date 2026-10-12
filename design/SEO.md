@@ -185,7 +185,7 @@ Mistral. **Every one of those projects has an integrations page or ecosystem lis
 That's the single highest-value backlink action available, and it's a PR to a docs repo, not
 outreach. Pair each one with the matching `/integrations/<framework>` page from Tier 3.
 
-**2. Package registries.** `pypi.org` and `npmjs.com` both link to Langfuse. `tracelyai` is on
+**2. Package registries.** `pypi.org` and `npmjs.com` both link to Langfuse. `tracelyai-sdk` is on
 PyPI already — make sure the package metadata points at `tracely-ai.com`, not just the repo.
 Free link, already earned, possibly not claimed.
 

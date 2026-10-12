@@ -74,7 +74,7 @@ Then in the Tracely UI, under **Scenarios**:
 3. **Run** it — Tracely POSTs each turn to the server and the conversation fills in under a fresh
    thread, graded by your evaluators.
 
-The demos use the published [`tracelyai`](https://pypi.org/project/tracelyai/) package (≥ 0.4.1)
+The demos use the published [`tracelyai-sdk`](https://pypi.org/project/tracelyai-sdk/) package (≥ 0.0.1)
 — exactly what your own app would install.
 
 ## The integration, in full

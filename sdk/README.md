@@ -1,4 +1,4 @@
-# `tracelyai` — instrument agents + the CI gate CLI
+# `tracelyai-sdk` — instrument agents + the CI gate CLI
 
 Two things in one small package:
 
@@ -8,8 +8,8 @@ Two things in one small package:
 The core depends only on `opentelemetry-sdk` + the OTLP HTTP exporter (Python ≥ 3.10); a provider extra adds that provider's auto-instrumentor.
 
 ```bash
-pip install "tracelyai[openai]"   # provider extras: [openai] [anthropic] [langchain] [litellm] [all]
-# or: pip install tracelyai       # core only (manual API + CLI)
+pip install "tracelyai-sdk[openai]"   # provider extras: [openai] [anthropic] [langchain] [litellm] [all]
+# or: pip install tracelyai-sdk       # core only (manual API + CLI)
 # import name is `tracely_sdk`; the CLI is `tracely` (entry point tracely_sdk.cli:main)
 ```
 

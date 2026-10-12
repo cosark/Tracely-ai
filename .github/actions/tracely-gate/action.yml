@@ -63,7 +63,7 @@ inputs:
     description: >
       pip spec for the Tracely SDK (which provides the `tracely` CLI). Defaults to PyPI..
     required: false
-    default: "tracelyai"
+    default: "tracelyai-sdk"
 
 runs:
   using: "composite"

@@ -1,7 +1,7 @@
 # Domain migration — `tracely-studio.xyz` → `tracely-ai.com`
 
 **Date:** 2026-08-22 · **Reason:** `.xyz` ranks poorly; `tracely-ai.com` matches the PyPI package
-name (`tracelyai`) and is the domain we want to accrue authority on.
+name (`tracelyai-sdk`) and is the domain we want to accrue authority on.
 
 The old domain is **not** retired. It stays registered, stays attached to the same Railway services,
 and 308-redirects every path to the new one — that redirect is the only thing that carries the
@@ -93,7 +93,7 @@ Every occurrence of the old domain in the repo was rewritten. Notable ones:
       properties verified and the 308 live. Resubmit `https://tracely-ai.com/sitemap.xml`.
 - [x] **Resend** — `tracely-ai.com` verified (DKIM/SPF live); `EMAIL_FROM` on the `api` service is
       now `Tracely <support@tracely-ai.com>` (2026-08-22).
-- [ ] **PyPI** — the new `Homepage`/`Documentation` only appear after the next `tracelyai` release.
+- [ ] **PyPI** — the new `Homepage`/`Documentation` only appear after the next `tracelyai-sdk` release.
 - [ ] **MCP registry** — republish `server.json` so the listed remote URL is the new one.
 - [ ] **The 2–3 existing backlinks** — the 308 is enough for SEO, but ask the linking sites to point
       at `tracely-ai.com` directly where it's cheap. A direct link is worth more than a redirected one.

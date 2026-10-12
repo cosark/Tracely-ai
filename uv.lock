@@ -12,7 +12,7 @@ members = [
     "tracely-backend",
     "tracely-monorepo",
     "tracely-workers",
-    "tracelyai",
+    "tracelyai-sdk",
 ]
 
 [[package]]
@@ -5629,7 +5629,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "python-dotenv" },
     { name = "ruff" },
-    { name = "tracelyai", extra = ["all"] },
+    { name = "tracelyai-sdk", extra = ["all"] },
 ]
 
 [package.metadata]
@@ -5642,7 +5642,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "ruff", specifier = ">=0.16.9" },
-    { name = "tracelyai", extras = ["all"], editable = "sdk" },
+    { name = "tracelyai-sdk", extras = ["all"], editable = "sdk" },
 ]
 
 [[package]]
@@ -5657,8 +5657,8 @@ dependencies = [
 requires-dist = [{ name = "tracely-backend", editable = "backend" }]
 
 [[package]]
-name = "tracelyai"
-version = "0.4.3"
+name = "tracelyai-sdk"
+version = "0.0.1"
 source = { editable = "sdk" }
 dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
@@ -5789,7 +5789,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-anthropic", marker = "extra == 'openllmetry'", specifier = ">=0.30b0" },
     { name = "opentelemetry-instrumentation-openai-v2", marker = "extra == 'openllmetry'", specifier = ">=2.0b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.45.0" },
-    { name = "tracelyai", extras = ["openai", "anthropic", "google", "mistral", "bedrock", "groq", "langchain", "llama-index", "crewai", "litellm", "openai-agents", "google-adk", "claude-agent-sdk", "openrouter"], marker = "extra == 'all'", editable = "sdk" },
+    { name = "tracelyai-sdk", extras = ["openai", "anthropic", "google", "mistral", "bedrock", "groq", "langchain", "llama-index", "crewai", "litellm", "openai-agents", "google-adk", "claude-agent-sdk", "openrouter"], marker = "extra == 'all'", editable = "sdk" },
 ]
 provides-extras = ["openai", "anthropic", "google", "mistral", "bedrock", "groq", "langchain", "llama-index", "crewai", "litellm", "openai-agents", "google-adk", "claude-agent-sdk", "openrouter", "xai", "openrouter-openai", "google-genai", "mistral-sdk", "openllmetry", "all"]
 

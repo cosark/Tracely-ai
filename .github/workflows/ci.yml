@@ -25,9 +25,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      # --frozen installs exactly what uv.lock pins (incl. the tracelyai[all] provider extras),
+      # --frozen installs exactly what uv.lock pins (incl. the tracelyai-sdk[all] provider extras),
       # so CI also catches lock/extra drift — the "transitive-conflict minefield" risk.
-      # --all-packages is required: the dev group pulls in tracelyai (the SDK) but NOT
+      # --all-packages is required: the dev group pulls in tracelyai-sdk (the SDK) but NOT
       # tracely-backend, so without it `backend/tests/conftest.py` dies on `import tracely`.
       # Matches `make install`.
       - name: Install (uv sync --frozen --all-packages)

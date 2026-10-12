@@ -23,7 +23,7 @@ This is the leverage. Braintrust and LangSmith are closed SaaS — locked out of
 |---|---|
 | **MIT + complete self-host** | OpenAlternative, every open-source directory, `awesome-*` lists |
 | **642 GitHub stars** | Awesome-list maintainers filter on stars; you clear most bars |
-| **PyPI `tracelyai`** | Package-ecosystem discovery (done — keep the README good) |
+| **PyPI `tracelyai-sdk`** | Package-ecosystem discovery (done — keep the README good) |
 | **MCP server at `/mcp`** | MCP registries — a whole directory category most eval tools aren't in |
 | **Agent skill (`skills/tracely`)** | Claude Code / agent-skill directories — brand new category, low competition |
 | **Railway one-click template** | Railway template marketplace (organic installs, zero effort) |
@@ -76,7 +76,7 @@ Name:        Tracely
 URL:         https://tracely-ai.com
 GitHub:      https://github.com/jwuthri-cloud/Tracely-ai
 Docs:        https://doc.tracely-ai.com
-License:     MIT · self-hostable · Python SDK: pip install tracelyai
+License:     MIT · self-hostable · Python SDK: pip install tracelyai-sdk
 
 Tagline (60):  Production agent failures become CI regression tests
 Tagline (100): Trace-native CI/CD for AI agents — production failures become regression tests that block the PR

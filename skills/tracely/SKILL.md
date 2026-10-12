@@ -1,6 +1,6 @@
 ---
 name: tracely
-description: Instrument AI agents with Tracely and turn their production traces into CI gates. Use when the user mentions Tracely, tracelyai, tracely_sdk, the `tracely` CLI, or asks to trace/observe an AI agent, add LLM evaluators or LLM-as-a-judge columns, debug why a trace or conversation isn't showing up, wire agent regression tests into a PR check, run scenario or red-team suites against an agent endpoint, or replay recorded agent failures in CI. Covers both zero-span-code automatic instrumentation and the manual span API.
+description: Instrument AI agents with Tracely and turn their production traces into CI gates. Use when the user mentions Tracely, tracelyai-sdk, tracely_sdk, the `tracely` CLI, or asks to trace/observe an AI agent, add LLM evaluators or LLM-as-a-judge columns, debug why a trace or conversation isn't showing up, wire agent regression tests into a PR check, run scenario or red-team suites against an agent endpoint, or replay recorded agent failures in CI. Covers both zero-span-code automatic instrumentation and the manual span API.
 license: MIT
 ---
 
@@ -35,7 +35,7 @@ compose — manual spans nest inside auto-instrumented traces in the same tree.
 ## Connect
 
 ```python
-import tracely_sdk as tracely   # pip install "tracelyai[openai]"  ([anthropic] [langchain] [all])
+import tracely_sdk as tracely   # pip install "tracelyai-sdk[openai]"  ([anthropic] [langchain] [all])
 
 tracely.init(
     endpoint="http://localhost:8000",   # hosted: https://api.tracely-ai.com

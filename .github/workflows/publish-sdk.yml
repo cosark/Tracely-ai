@@ -5,9 +5,9 @@ name: publish sdk
 # long-lived API token in CI is the next thing to regret; OIDC is the durable answer.
 #
 # ── one-time setup on PyPI ────────────────────────────────────────────────────────────────
-#   pypi.org → project `tracelyai` → Manage → Publishing → Add a new publisher (GitHub):
+#   pypi.org → project `tracelyai-sdk` → Manage → Publishing → Add a new publisher (GitHub):
 #     Owner:          jwuthri-cloud
-#     Repository:     Tracely
+#     Repository:     Tracely-ai
 #     Workflow name:  publish-sdk.yml
 #     Environment:    pypi
 #   Then here: Settings → Environments → New environment → `pypi` (add a required reviewer if
@@ -59,7 +59,7 @@ jobs:
           uv run pytest -q sdk/tests
 
       - name: Build
-        run: uv build --package tracelyai --out-dir dist-sdk
+        run: uv build --package tracelyai-sdk --out-dir dist-sdk
 
       # Catches the classic silent break: a wheel that imports but is missing the very API the
       # release exists to ship. Runs against the BUILT artifact in a throwaway env, not the tree.

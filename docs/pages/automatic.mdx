@@ -14,7 +14,7 @@ LangChain / LiteLLM code is traced into Tracely with **no span code**: model, me
 ## Install with a provider extra
 
 ```bash
-pip install "tracelyai[openai]"            # or [anthropic], [langchain], [crewai], [all]
+pip install "tracelyai-sdk[openai]"            # or [anthropic], [langchain], [crewai], [all]
 ```
 
 Each extra pulls the matching auto-instrumentor:
@@ -30,7 +30,7 @@ Each extra pulls the matching auto-instrumentor:
 Tracely adopts the OpenTelemetry ecosystem rather than reinventing it: the extras install
 [OpenInference](https://github.com/Arize-ai/openinference) (Arize) packages by default;
 [OpenLLMetry](https://github.com/traceloop/openllmetry) (Traceloop) is an equivalent alternative that
-`init("auto")` also detects (`pip install "tracelyai[openllmetry]"`). The backend ingests both
+`init("auto")` also detects (`pip install "tracelyai-sdk[openllmetry]"`). The backend ingests both
 conventions (`gen_ai.*` and `llm.*`) independently, so either works.
 
 ## One-call setup
@@ -149,7 +149,7 @@ All four nest into one trace via OpenTelemetry context. Use as much or as little
 ## LangChain & LangGraph
 
 ```bash
-pip install "tracelyai[langchain]"
+pip install "tracelyai-sdk[langchain]"
 ```
 
 Chains, agents, and **LangGraph** graphs trace end-to-end with no manual spans — `init()`
@@ -270,7 +270,7 @@ tracely.init(instrument=["litellm"])     # wires litellm.callbacks = ["otel"]
 Both have OpenInference instrumentors. They are **not** part of `"auto"` — name them explicitly:
 
 ```bash
-pip install "tracelyai[crewai]"        # or [llama-index]
+pip install "tracelyai-sdk[crewai]"        # or [llama-index]
 ```
 
 ```python

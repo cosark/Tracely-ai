@@ -74,11 +74,11 @@ export function Activation(s: ActivationState) {
         <>
           <p className="text-[12.5px] text-fg-muted">
             Point the SDK at this workspace. Auto-instrumentation traces your existing agent with
-            no span code. The package is <code className="font-mono">tracelyai</code>.
+            no span code. The package is <code className="font-mono">tracelyai-sdk</code>.
           </p>
           <Snippet
             label="python"
-            code={`pip install "tracelyai[openai]"
+            code={`pip install "tracelyai-sdk[openai]"
 
 import tracely_sdk as tracely
 tracely.init(endpoint="${s.endpoint}", api_key="${s.ingestKey}")
@@ -129,7 +129,7 @@ with tracely.trace(agent="support", conversation="conv-1"):
           </p>
           <Snippet
             label="shell"
-            code={`pip install tracelyai
+            code={`pip install tracelyai-sdk
 TRACELY_API=${s.endpoint} TRACELY_KEY=${s.ingestKey} \\
   tracely replay --agent support --entrypoint app.agent:run`}
           />

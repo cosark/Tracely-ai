@@ -23,7 +23,7 @@ Things we consider in scope:
 - Injection via ingested trace content (OTLP payloads, tool outputs) reaching SQL, the LLM
   judge's privileged context, or the dashboard as XSS
 - Server-side LLM key exposure (the per-workspace key rule in `CLAUDE.md`)
-- Vulnerabilities in the published SDK (`tracelyai` on PyPI)
+- Vulnerabilities in the published SDK (`tracelyai-sdk` on PyPI)
 
 Out of scope: issues requiring `AUTH_MODE=dev` (open, local-only; prod refuses to boot in it),
 the seeded `tracely_dev_key`, denial of service against a self-hosted instance, and reports from

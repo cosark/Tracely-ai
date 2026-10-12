@@ -17,7 +17,7 @@ that would ship them again — and tells you the moment any of it happens.
 
 [**Website**](https://tracely-ai.com) · [**Docs**](https://doc.tracely-ai.com) · [**Product guide**](https://doc.tracely-ai.com/product) · [**Agent skill**](#teach-your-coding-agent-tracely) · [**Guided tour**](guides/OVERVIEW.md) · [**2-min demo**](guides/DEMO.md) · [**Design dossier**](design/README.md)
 
-[![CI](https://github.com/jwuthri-cloud/Tracely-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/jwuthri-cloud/Tracely-ai/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/tracelyai?logo=pypi&logoColor=white)](https://pypi.org/project/tracelyai/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://pypi.org/project/tracelyai/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/jwuthri-cloud/Tracely-ai?style=flat&logo=github)](https://github.com/jwuthri-cloud/Tracely-ai/stargazers) [![MCPVault: claimed](https://mcpvault.io/badge/tracely.svg?theme=dark)](https://mcpvault.io/servers/tracely/health?utm_source=external_badge&utm_medium=referral&utm_campaign=mcp_health_report)
+[![CI](https://github.com/jwuthri-cloud/Tracely-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/jwuthri-cloud/Tracely-ai/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/tracelyai-sdk?logo=pypi&logoColor=white)](https://pypi.org/project/tracelyai-sdk/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://pypi.org/project/tracelyai-sdk/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/jwuthri-cloud/Tracely-ai?style=flat&logo=github)](https://github.com/jwuthri-cloud/Tracely-ai/stargazers) [![MCPVault: claimed](https://mcpvault.io/badge/tracely.svg?theme=dark)](https://mcpvault.io/servers/tracely/health?utm_source=external_badge&utm_medium=referral&utm_campaign=mcp_health_report)
 
 **Self-host the whole stack in one click** — API, worker, UI, Postgres, ClickHouse, Redis and MinIO:
 
@@ -225,7 +225,7 @@ Prefer to wire it yourself, or deploying somewhere else? The manual walkthrough 
 ## Send your first trace
 
 ```bash
-pip install "tracelyai[openai]"     # or [anthropic], [langchain], [all]
+pip install "tracelyai-sdk[openai]"     # or [anthropic], [langchain], [all]
 ```
 
 Initialize once at startup, then wrap a run — your normal provider calls are captured automatically,
@@ -358,7 +358,7 @@ fixtures — deterministic, offline, **no API keys, no cost** — then gates. Gu
 inputs are tested.
 
 ```yaml
-      - run: pip install tracelyai
+      - run: pip install tracelyai-sdk
       - run: tracely replay planner --entrypoint my_pkg.agent:run    # a Python agent
         # …or any language:  tracely replay planner --cmd "node run.js"  (reads $TRACELY_INPUT)
         env:
@@ -485,7 +485,7 @@ SDK/OTLP → POST /v1/traces → S3 blob (durable FIRST) → Redis/Celery
 | Registry (OLTP) | **Postgres + pgvector** + SQLAlchemy 2.0 + Alembic | `backend/migrations` |
 | Queue / Blobs | **Redis** / **MinIO·S3** (blob-first, source of truth) | — |
 | Frontend | **Next.js 15** (App Router) + Tailwind + React Flow | [`frontend/`](frontend/README.md) |
-| SDK + CI gate CLI | **`tracelyai`** (OTel wrapper + `tracely` CLI) | [`sdk/`](sdk/README.md) |
+| SDK + CI gate CLI | **`tracelyai-sdk`** (OTel wrapper + `tracely` CLI) | [`sdk/`](sdk/README.md) |
 | Tooling | **uv** workspace (Python) · **pnpm** (web) | — |
 
 One deliberate adaptation: ClickHouse server-side `async_insert` instead of an in-process write buffer

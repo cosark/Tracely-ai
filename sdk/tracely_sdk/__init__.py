@@ -623,7 +623,7 @@ def _activate_one(name: str) -> bool:
         return False
     if _module_available(_PROVIDER_SDK.get(name, name)):  # SDK present but instrumentor missing
         log.warning(
-            'tracely: %s is installed but no instrumentor found — pip install "tracelyai[%s]"',
+            'tracely: %s is installed but no instrumentor found — pip install "tracelyai-sdk[%s]"',
             name,
             name,
         )

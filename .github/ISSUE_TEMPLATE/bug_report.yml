@@ -10,7 +10,7 @@ body:
         - Backend / API
         - Workers (ingest, evaluation, failure intel)
         - Frontend / dashboard
-        - SDK / CLI (tracelyai)
+        - SDK / CLI (tracelyai-sdk)
         - CI gate / GitHub Action
         - MCP server / in-app assistant
         - Docs
@@ -37,7 +37,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: Commit SHA / Docker image tag / `pip show tracelyai` version.
+      description: Commit SHA / Docker image tag / `pip show tracelyai-sdk` version.
   - type: input
     id: env
     attributes:

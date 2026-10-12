@@ -1,8 +1,8 @@
 [project]
-# ponytail: dist name is `tracelyai` because `tracely-ai` is already taken on PyPI.
+# ponytail: dist name is `tracelyai-sdk` because `tracelyai` was rejected as too similar to an existing project.
 # The import name stays `tracely_sdk`.
-name = "tracelyai"
-version = "0.4.3"
+name = "tracelyai-sdk"
+version = "0.0.1"
 description = "Tracely Python SDK: automatic + manual agent tracing, exported to Tracely over OTLP."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -54,7 +54,7 @@ openllmetry = [
   "opentelemetry-instrumentation-openai-v2>=2.0b0",
   "opentelemetry-instrumentation-anthropic>=0.30b0",
 ]
-all = ["tracelyai[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm,openai-agents,google-adk,claude-agent-sdk,openrouter]"]
+all = ["tracelyai-sdk[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm,openai-agents,google-adk,claude-agent-sdk,openrouter]"]
 
 [project.scripts]
 tracely = "tracely_sdk.cli:main"
