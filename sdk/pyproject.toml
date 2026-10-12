@@ -1,7 +1,7 @@
 [project]
-# ponytail: dist name is `tracely-ai` because `tracely` and `tracely-sdk` are both taken
-# on PyPI by unrelated projects. The import name stays `tracely_sdk`.
-name = "tracely-ai"
+# ponytail: dist name is `tracelyai` because `tracely-ai` is already taken on PyPI.
+# The import name stays `tracely_sdk`.
+name = "tracelyai"
 version = "0.4.3"
 description = "Tracely Python SDK: automatic + manual agent tracing, exported to Tracely over OTLP."
 readme = "README.md"
@@ -23,8 +23,8 @@ dependencies = [
 [project.urls]
 Homepage = "https://tracely-ai.com"
 Documentation = "https://doc.tracely-ai.com"
-Source = "https://github.com/Jwuthri/Tracely-ai"
-Issues = "https://github.com/Jwuthri/Tracely-ai/issues"
+Source = "https://github.com/jwuthri-cloud/Tracely-ai"
+Issues = "https://github.com/jwuthri-cloud/Tracely-ai/issues"
 
 [project.optional-dependencies]
 # frontier providers
@@ -54,7 +54,7 @@ openllmetry = [
   "opentelemetry-instrumentation-openai-v2>=2.0b0",
   "opentelemetry-instrumentation-anthropic>=0.30b0",
 ]
-all = ["tracely-ai[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm,openai-agents,google-adk,claude-agent-sdk,openrouter]"]
+all = ["tracelyai[openai,anthropic,google,mistral,bedrock,groq,langchain,llama-index,crewai,litellm,openai-agents,google-adk,claude-agent-sdk,openrouter]"]
 
 [project.scripts]
 tracely = "tracely_sdk.cli:main"

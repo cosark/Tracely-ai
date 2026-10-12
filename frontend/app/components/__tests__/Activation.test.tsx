@@ -25,7 +25,7 @@ describe("Activation", () => {
     render(<Activation {...state()} />);
     expect(screen.getByText("0 / 6")).toBeTruthy();
     const code = screen.getByText(/tracely.init/).textContent ?? "";
-    expect(code).toContain('pip install "tracely-ai[openai]"');
+    expect(code).toContain('pip install "tracelyai[openai]"');
     expect(code).toContain('api_key="tracely_k_abc"');
     expect(code).toContain('endpoint="https://api.example.com"');
     expect(screen.queryByText(/tracely replay/)).toBeNull();

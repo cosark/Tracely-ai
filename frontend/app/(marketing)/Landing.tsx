@@ -10,11 +10,11 @@ import { PipelinePeek } from "@/app/components/PipelinePeek";
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
-const GITHUB = "https://github.com/Jwuthri/Tracely-ai";
+const GITHUB = "https://github.com/jwuthri-cloud/Tracely-ai";
 const APP = "/dashboard"; // same app — the authed shell lives in the (app) route group
 const DOCS = "https://doc.tracely-ai.com";
 const LINKEDIN = "https://www.linkedin.com/in/julien-wuthrich-a75156119/";
-const INSTALL = 'pip install "tracely-ai[openai]"';
+const INSTALL = 'pip install "tracelyai[openai]"';
 const API = "https://api.tracely-ai.com"; // the hosted backend — self-hosters swap in their own
 
 /* ---------------------------------- ui bits ---------------------------------- */
@@ -345,7 +345,7 @@ const YAML_LINES: ReactNode[] = [
   <span key="5" className={c.p}>{"    "}<span className={c.k}>steps</span>:</span>,
   <span key="6" className={c.p}>{"      "}- <span className={c.k}>uses</span>: actions/checkout@v4</span>,
   <span key="7" className={c.cm}>{"      "}# → run your agent here; traces stream in with env=ci</span>,
-  <span key="8" className={c.p}>{"      "}- <span className={c.k}>uses</span>: Jwuthri/Tracely-ai/.github/actions/tracely-gate@master</span>,
+  <span key="8" className={c.p}>{"      "}- <span className={c.k}>uses</span>: jwuthri-cloud/Tracely-ai/.github/actions/tracely-gate@master</span>,
   <span key="9" className={c.p}>{"        "}<span className={c.k}>with</span>:</span>,
   <span key="10" className={c.p}>{"          "}<span className={c.k}>agent</span>: support-agent</span>,
   <span key="11" className={c.p}>{"          "}<span className={c.k}>api</span>:{"   "}<span className={c.s}>https://tracely.your-co.dev</span></span>,
@@ -1028,7 +1028,7 @@ export default function Landing() {
               <div className="flex items-center justify-between border-b border-line/70 px-5 py-3">
                 <span className="font-mono text-[11px] text-fg-faint">agent.py</span>
                 <span className="rounded border border-line bg-ink-900 px-2 py-0.5 font-mono text-[10px] text-fg-faint">
-                  pip install &quot;tracely-ai[openai]&quot;
+                  pip install &quot;tracelyai[openai]&quot;
                 </span>
               </div>
               <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.8]">

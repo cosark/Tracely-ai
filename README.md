@@ -17,12 +17,12 @@ that would ship them again — and tells you the moment any of it happens.
 
 [**Website**](https://tracely-ai.com) · [**Docs**](https://doc.tracely-ai.com) · [**Product guide**](https://doc.tracely-ai.com/product) · [**Agent skill**](#teach-your-coding-agent-tracely) · [**Guided tour**](guides/OVERVIEW.md) · [**2-min demo**](guides/DEMO.md) · [**Design dossier**](design/README.md)
 
-[![CI](https://github.com/Jwuthri/Tracely-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Jwuthri/Tracely-ai/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/tracely-ai?logo=pypi&logoColor=white)](https://pypi.org/project/tracely-ai/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://pypi.org/project/tracely-ai/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/Jwuthri/Tracely-ai?style=flat&logo=github)](https://github.com/Jwuthri/Tracely-ai/stargazers) [![MCPVault: claimed](https://mcpvault.io/badge/tracely.svg?theme=dark)](https://mcpvault.io/servers/tracely/health?utm_source=external_badge&utm_medium=referral&utm_campaign=mcp_health_report)
+[![CI](https://github.com/jwuthri-cloud/Tracely-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/jwuthri-cloud/Tracely-ai/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/tracelyai?logo=pypi&logoColor=white)](https://pypi.org/project/tracelyai/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://pypi.org/project/tracelyai/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/jwuthri-cloud/Tracely-ai?style=flat&logo=github)](https://github.com/jwuthri-cloud/Tracely-ai/stargazers) [![MCPVault: claimed](https://mcpvault.io/badge/tracely.svg?theme=dark)](https://mcpvault.io/servers/tracely/health?utm_source=external_badge&utm_medium=referral&utm_campaign=mcp_health_report)
 
 **Self-host the whole stack in one click** — API, worker, UI, Postgres, ClickHouse, Redis and MinIO:
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/n5n_LE?referralCode=WCq5Cn&utm_medium=integration&utm_source=template&utm_campaign=generic)
-[![Deploy to Railyard](https://app.railyard.run/deploy/badge)](https://app.railyard.run/deploy?repo=https://github.com/Jwuthri/Tracely-ai)
+[![Deploy to Railyard](https://app.railyard.run/deploy/badge)](https://app.railyard.run/deploy?repo=https://github.com/jwuthri-cloud/Tracely-ai)
 
 <br />
 
@@ -170,7 +170,7 @@ Long-term roadmap: [10-mvp-and-roadmap.md](design/part2-tracely/10-mvp-and-roadm
 ### Everything in Docker — the whole product, populated
 
 ```bash
-git clone https://github.com/Jwuthri/Tracely-ai && cd Tracely
+git clone https://github.com/jwuthri-cloud/Tracely-ai && cd Tracely
 docker compose --profile demo up -d --build --wait
 open http://localhost:3001
 ```
@@ -225,7 +225,7 @@ Prefer to wire it yourself, or deploying somewhere else? The manual walkthrough 
 ## Send your first trace
 
 ```bash
-pip install "tracely-ai[openai]"     # or [anthropic], [langchain], [all]
+pip install "tracelyai[openai]"     # or [anthropic], [langchain], [all]
 ```
 
 Initialize once at startup, then wrap a run — your normal provider calls are captured automatically,
@@ -308,7 +308,7 @@ drives them itself. **Nothing to install, import or shim**, so a TypeScript or G
 like a Python one.
 
 ```yaml
-      - uses: Jwuthri/Tracely-ai/.github/actions/tracely-gate@master
+      - uses: jwuthri-cloud/Tracely-ai/.github/actions/tracely-gate@master
         with:
           api:   https://tracely.your-co.dev
           key:   ${{ secrets.TRACELY_KEY }}
@@ -340,7 +340,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # → your existing step(s) that run the agent and emit env=ci traces go here ←
-      - uses: Jwuthri/Tracely-ai/.github/actions/tracely-gate@master
+      - uses: jwuthri-cloud/Tracely-ai/.github/actions/tracely-gate@master
         with:
           mode:  gate                          # grade the ci traces this workflow emitted
           agent: planner                       # which agent's promoted suite to run
@@ -358,7 +358,7 @@ fixtures — deterministic, offline, **no API keys, no cost** — then gates. Gu
 inputs are tested.
 
 ```yaml
-      - run: pip install tracely-ai
+      - run: pip install tracelyai
       - run: tracely replay planner --entrypoint my_pkg.agent:run    # a Python agent
         # …or any language:  tracely replay planner --cmd "node run.js"  (reads $TRACELY_INPUT)
         env:
@@ -429,7 +429,7 @@ what to evaluate, and how to wire the gate — so "add Tracely to this agent" is
 of a docs tab.
 
 ```bash
-npx skills add https://github.com/Jwuthri/Tracely-ai --skill tracely
+npx skills add https://github.com/jwuthri-cloud/Tracely-ai --skill tracely
 ```
 
 Works with Claude Code, Cursor, Copilot, Antigravity and anything else the
@@ -485,7 +485,7 @@ SDK/OTLP → POST /v1/traces → S3 blob (durable FIRST) → Redis/Celery
 | Registry (OLTP) | **Postgres + pgvector** + SQLAlchemy 2.0 + Alembic | `backend/migrations` |
 | Queue / Blobs | **Redis** / **MinIO·S3** (blob-first, source of truth) | — |
 | Frontend | **Next.js 15** (App Router) + Tailwind + React Flow | [`frontend/`](frontend/README.md) |
-| SDK + CI gate CLI | **`tracely-ai`** (OTel wrapper + `tracely` CLI) | [`sdk/`](sdk/README.md) |
+| SDK + CI gate CLI | **`tracelyai`** (OTel wrapper + `tracely` CLI) | [`sdk/`](sdk/README.md) |
 | Tooling | **uv** workspace (Python) · **pnpm** (web) | — |
 
 One deliberate adaptation: ClickHouse server-side `async_insert` instead of an in-process write buffer
@@ -500,7 +500,7 @@ One deliberate adaptation: ClickHouse server-side `async_insert` instead of an i
 | [`frontend/`](frontend/README.md) | The Next.js web app — trace explorer, clusters, cases, gates, trends, alerts builder, settings, auth. |
 | [`sdk/`](sdk/README.md) | The Python SDK (instrument agents over OTLP, hermetic record-replay) + the `tracely` CI gate CLI. |
 | [`docs/`](docs/README.md) | The published docs site (Nextra) — SDK reference **and** the per-screen product guide. `make docs` → :3002. |
-| [`skills/`](skills/tracely/SKILL.md) | The Tracely agent skill — `npx skills add https://github.com/Jwuthri/Tracely-ai --skill tracely`. |
+| [`skills/`](skills/tracely/SKILL.md) | The Tracely agent skill — `npx skills add https://github.com/jwuthri-cloud/Tracely-ai --skill tracely`. |
 | [`scripts/`](scripts/README.md) | Dev/demo helpers (raw-OTLP sender, one-command `seed_demo.py`, gate shim). |
 | [`design/`](design/README.md) | The full design dossier — reverse-engineered Langfuse + every Tracely design decision. |
 
@@ -541,7 +541,7 @@ cd frontend && pnpm test && pnpm build      # vitest + tsc typecheck + lint
 
 <div align="center">
 
-**[tracely-ai.com](https://tracely-ai.com)** · [Docs](https://doc.tracely-ai.com) · [Product guide](https://doc.tracely-ai.com/product) · [Star on GitHub](https://github.com/Jwuthri/Tracely-ai)
+**[tracely-ai.com](https://tracely-ai.com)** · [Docs](https://doc.tracely-ai.com) · [Product guide](https://doc.tracely-ai.com/product) · [Star on GitHub](https://github.com/jwuthri-cloud/Tracely-ai)
 
 If Tracely is useful to you, a ⭐ helps other people find it.
 

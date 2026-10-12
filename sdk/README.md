@@ -1,4 +1,4 @@
-# `tracely-ai` — instrument agents + the CI gate CLI
+# `tracelyai` — instrument agents + the CI gate CLI
 
 Two things in one small package:
 
@@ -8,8 +8,8 @@ Two things in one small package:
 The core depends only on `opentelemetry-sdk` + the OTLP HTTP exporter (Python ≥ 3.10); a provider extra adds that provider's auto-instrumentor.
 
 ```bash
-pip install "tracely-ai[openai]"   # provider extras: [openai] [anthropic] [langchain] [litellm] [all]
-# or: pip install tracely-ai       # core only (manual API + CLI)
+pip install "tracelyai[openai]"   # provider extras: [openai] [anthropic] [langchain] [litellm] [all]
+# or: pip install tracelyai       # core only (manual API + CLI)
 # import name is `tracely_sdk`; the CLI is `tracely` (entry point tracely_sdk.cli:main)
 ```
 
@@ -74,7 +74,7 @@ incoming context is ambient — pass `conversation` and leave `traceparent` unse
 (`instrument=["litellm"]` — 100+ providers via one callback), and a non-patching drop-in
 (`from tracely_sdk.openai import OpenAI` / `wrap_openai`). Under `"auto"`, when the LangChain
 instrumentor is present it owns LLM spans and the provider instrumentors are skipped to avoid
-duplicate spans (override with an explicit list). Full guide: the docs [Automatic instrumentation](https://github.com/Jwuthri/Tracely-ai/blob/master/docs/pages/automatic.mdx) page.
+duplicate spans (override with an explicit list). Full guide: the docs [Automatic instrumentation](https://github.com/jwuthri-cloud/Tracely-ai/blob/master/docs/pages/automatic.mdx) page.
 
 ### Manual / custom spans (the escape hatch)
 
@@ -236,7 +236,7 @@ def run(user_input: str):
 
 `ReplayReport.providers` says which of these were actually patched in the process (`patched` / `absent` / `failed: …`). A provider or surface outside the table stays live in replay — the SDK cannot see that call. What catches it is the report: recorded calls the run never asked for (`unused`, also logged as a warning) mean something went to the network instead of being replayed. The SDK does **not** sandbox arbitrary Python or deny egress; a run that needs that guarantee has to deny provider/tool egress in the executor itself. The manual `call_llm` seam remains the way to get provider-agnostic hermetic replay everywhere.
 
-This is what makes replay deterministic, offline, and free (no API keys, no cost). See [regression-testing design](https://github.com/Jwuthri/Tracely-ai/blob/master/design/part2-tracely/05-regression-testing.md).
+This is what makes replay deterministic, offline, and free (no API keys, no cost). See [regression-testing design](https://github.com/jwuthri-cloud/Tracely-ai/blob/master/design/part2-tracely/05-regression-testing.md).
 
 ---
 

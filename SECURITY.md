@@ -5,7 +5,7 @@
 **Please do not open a public issue for security problems.**
 
 Report privately via GitHub's
-[private vulnerability reporting](https://github.com/Jwuthri/Tracely-ai/security/advisories/new).
+[private vulnerability reporting](https://github.com/jwuthri-cloud/Tracely-ai/security/advisories/new).
 Include what the issue is, how to reproduce it, and what you think the impact is.
 
 You can expect an acknowledgement within 72 hours and a fix or mitigation plan within 14 days
@@ -23,7 +23,7 @@ Things we consider in scope:
 - Injection via ingested trace content (OTLP payloads, tool outputs) reaching SQL, the LLM
   judge's privileged context, or the dashboard as XSS
 - Server-side LLM key exposure (the per-workspace key rule in `CLAUDE.md`)
-- Vulnerabilities in the published SDK (`tracely-ai` on PyPI)
+- Vulnerabilities in the published SDK (`tracelyai` on PyPI)
 
 Out of scope: issues requiring `AUTH_MODE=dev` (open, local-only; prod refuses to boot in it),
 the seeded `tracely_dev_key`, denial of service against a self-hosted instance, and reports from

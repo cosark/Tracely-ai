@@ -23,7 +23,7 @@ This is the leverage. Braintrust and LangSmith are closed SaaS — locked out of
 |---|---|
 | **MIT + complete self-host** | OpenAlternative, every open-source directory, `awesome-*` lists |
 | **642 GitHub stars** | Awesome-list maintainers filter on stars; you clear most bars |
-| **PyPI `tracely-ai`** | Package-ecosystem discovery (done — keep the README good) |
+| **PyPI `tracelyai`** | Package-ecosystem discovery (done — keep the README good) |
 | **MCP server at `/mcp`** | MCP registries — a whole directory category most eval tools aren't in |
 | **Agent skill (`skills/tracely`)** | Claude Code / agent-skill directories — brand new category, low competition |
 | **Railway one-click template** | Railway template marketplace (organic installs, zero effort) |
@@ -74,9 +74,9 @@ Every item here costs $0. Verified 2026-08-15: OpenAlternative is no longer on t
 ```
 Name:        Tracely
 URL:         https://tracely-ai.com
-GitHub:      https://github.com/Jwuthri/Tracely-ai
+GitHub:      https://github.com/jwuthri-cloud/Tracely-ai
 Docs:        https://doc.tracely-ai.com
-License:     MIT · self-hostable · Python SDK: pip install tracely-ai
+License:     MIT · self-hostable · Python SDK: pip install tracelyai
 
 Tagline (60):  Production agent failures become CI regression tests
 Tagline (100): Trace-native CI/CD for AI agents — production failures become regression tests that block the PR
@@ -221,7 +221,7 @@ tags:
   - openai
   - langchain
 urls:
-  repo: https://github.com/Jwuthri/Tracely-ai
+  repo: https://github.com/jwuthri-cloud/Tracely-ai
   website: https://tracely-ai.com
   docs: https://doc.tracely-ai.com
 license: MIT
@@ -231,7 +231,7 @@ description:
   clusters can be replayed as regression tests in CI.
 authors:
   - name: Julien Wuthrich
-    url: https://github.com/Jwuthri
+    url: https://github.com/jwuthri-cloud
 createdAt: 2026-08-15
 isNative: false
 isFirstParty: true

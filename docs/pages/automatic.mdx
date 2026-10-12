@@ -14,7 +14,7 @@ LangChain / LiteLLM code is traced into Tracely with **no span code**: model, me
 ## Install with a provider extra
 
 ```bash
-pip install "tracely-ai[openai]"            # or [anthropic], [langchain], [crewai], [all]
+pip install "tracelyai[openai]"            # or [anthropic], [langchain], [crewai], [all]
 ```
 
 Each extra pulls the matching auto-instrumentor:
@@ -30,7 +30,7 @@ Each extra pulls the matching auto-instrumentor:
 Tracely adopts the OpenTelemetry ecosystem rather than reinventing it: the extras install
 [OpenInference](https://github.com/Arize-ai/openinference) (Arize) packages by default;
 [OpenLLMetry](https://github.com/traceloop/openllmetry) (Traceloop) is an equivalent alternative that
-`init("auto")` also detects (`pip install "tracely-ai[openllmetry]"`). The backend ingests both
+`init("auto")` also detects (`pip install "tracelyai[openllmetry]"`). The backend ingests both
 conventions (`gen_ai.*` and `llm.*`) independently, so either works.
 
 ## One-call setup
@@ -133,7 +133,7 @@ This yields a 4-span tree — `weather-agent` (AGENT) → `decide` (GENERATION) 
 
 `as_type` ∈ `span` · `generation` · `agent` · `tool` · `skill` · `delegate` · `chain` · `retriever` ·
 `thinking` · `embedding` · `guardrail` · … (`capture_input` / `capture_output` default `True`). See
-[`sdk/examples/auto_agent.py`](https://github.com/Jwuthri/Tracely-ai/blob/master/sdk/examples/auto_agent.py).
+[`sdk/examples/auto_agent.py`](https://github.com/jwuthri-cloud/Tracely-ai/blob/master/sdk/examples/auto_agent.py).
 
 ## The layers compose
 
@@ -149,7 +149,7 @@ All four nest into one trace via OpenTelemetry context. Use as much or as little
 ## LangChain & LangGraph
 
 ```bash
-pip install "tracely-ai[langchain]"
+pip install "tracelyai[langchain]"
 ```
 
 Chains, agents, and **LangGraph** graphs trace end-to-end with no manual spans — `init()`
@@ -270,7 +270,7 @@ tracely.init(instrument=["litellm"])     # wires litellm.callbacks = ["otel"]
 Both have OpenInference instrumentors. They are **not** part of `"auto"` — name them explicitly:
 
 ```bash
-pip install "tracely-ai[crewai]"        # or [llama-index]
+pip install "tracelyai[crewai]"        # or [llama-index]
 ```
 
 ```python
