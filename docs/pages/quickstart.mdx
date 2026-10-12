@@ -1,0 +1,90 @@
+---
+description: "Install tracely-ai and trace your first AI agent run in three lines of Python. Requires Python 3.10+ and one provider extra."
+---
+
+import { Callout, Steps } from "nextra/components";
+
+# Quickstart
+
+Instrument an agent and see the trace in Tracely in about five minutes.
+
+## Install
+
+```bash
+pip install "tracely-ai[openai]"        # add the provider you use: [anthropic], [langchain], [all]
+# or, from this repo:  uv pip install -e sdk   /   pip install ./sdk
+```
+
+Requires Python ≥ 3.10. The core depends only on `opentelemetry-sdk` + the OTLP/HTTP exporter; a
+provider extra adds that provider's auto-instrumentor. The install also adds the `tracely` CLI
+(entry point `tracely_sdk.cli:main`).
+
+<Callout type="info">
+  You need a running Tracely backend. From the repo root: `docker compose up -d --build --wait`,
+  then the API is at `http://localhost:8000` with the dev ingest key `tracely_dev_key`.
+</Callout>
+
+## Instrument an agent
+
+<Steps>
+
+### Initialize once at startup
+
+```python
+import tracely_sdk as tracely
+
+tracely.init(
+    endpoint="http://localhost:8000",   # your Tracely API
+    api_key="tracely_dev_key",          # an ingest key
+    service_name="support-agent",
+    env="prod",                         # prod | staging | ci | dev  — the gating axis
+    instrument="auto",                  # auto-detect openai / anthropic / google / mistral / langchain
+)
+```
+
+Your agent's **name is what you declare** — `service_name` names it by default, `agent=` on `init()` overrides that for the app, `agent=` on `trace()` for one run. It is never guessed from framework attributes: a harness stamps its own `gen_ai.agent.name` on every sub-agent it spins up, which would fill your workspace with agents you never chose. Name neither and every trace lands under one `default` agent. **One codebase, many customers?** Add `trace(tenant=customer_id)`: each tenant becomes its own Agent — endpoint, scenarios, CI gate, failure clusters and regression cases are per-tenant, the traces list shows and filters by it — while `agent=` stays the per-span label ("supervisor", "billing") in the trace's Agent column.
+
+### Call your model — no span code
+
+Your normal OpenAI/Anthropic/… calls are captured automatically. Wrap a run in `tracely.trace(...)`
+to attach the agent / conversation / user to every span.
+
+```python
+from openai import OpenAI
+client = OpenAI()
+
+with tracely.trace(agent="support-agent", conversation="conv-1", user="u_42"):
+    client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Where is order ORD-4471?"}],
+    )
+```
+
+That produces a **GENERATION** span with model, messages, tokens, latency, tool calls, and cost —
+with zero span code. See [Automatic instrumentation](/automatic) for `@observe`, streaming, threads,
+and LiteLLM. Need a span for your own logic? The manual API is at [Custom spans](/instrumentation).
+
+### Flush before the process exits
+
+```python
+tracely.flush()   # force-flush the OTLP exporter
+```
+
+</Steps>
+
+## See it
+
+Open the Tracely UI (`http://localhost:3001` by default) → **Traces**. Your run appears as a
+conversation; expand it to see the agent → llm → tool tree, token usage, and cost.
+
+<Callout type="default">
+  Want a fully-populated demo instead? `docker compose exec backend python sdk/examples/seed_conversations.py`
+  seeds rich conversations exercising every helper (RAG, multi-agent handoffs, multimodal, …).
+</Callout>
+
+## What's next
+
+- [Automatic instrumentation](/automatic) — `instrument="auto"`, `@observe`, `trace()`, streaming, LiteLLM, threads.
+- [Core concepts](/concepts) — what the observation types mean and how runs thread into conversations.
+- [Custom spans](/instrumentation) — the manual API: retrievers, embeddings, guardrails, thinking, handoffs, metadata.
+- [MCP server](/mcp) — read those traces (and write evaluators) from your coding agent, no glue code.

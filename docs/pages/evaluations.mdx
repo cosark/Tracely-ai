@@ -1,0 +1,118 @@
+---
+description: "Configure LLM-as-a-judge evaluators as columns on the trace table — conversation, run or span level, online or on-demand, basic rubric or advanced template."
+---
+
+# Evaluations
+
+Every evaluator you add is a **column** in the trace table. A column has three choices that
+decide what the judge reads and when it runs: a **level**, an **execution mode**, and a prompt
+style (**basic** rubric or **advanced** template).
+
+## Levels
+
+| Level | One result per | The judge reads |
+|---|---|---|
+| Conversation | thread | the whole transcript, turn by turn |
+| Message | turn | that turn's user request and agent answer |
+| Step | span (tool call, generation, …) | that step's input and output |
+
+## Batch vs sequential
+
+**Batch** (default) grades every item independently — nothing carries over between items, so two
+grades of the same item are directly comparable.
+
+**Sequential** grades items in order as one running conversation with the judge: the rubric is
+the system prompt, then item → verdict → item → verdict. A step column chains the steps within a
+message; a message column chains the turns of a thread. Each item is graded knowing what came
+before it — and the previous result of the same metric is available for continuity.
+
+Sequential grading is incremental: when new turns arrive, only the new turns are graded and
+appended to the judge's conversation. Re-running a column from the UI re-grades everything from
+the start. Conversation-level columns have a single item, so the mode makes no difference there.
+
+## Advanced templates and sequential mode
+
+An advanced prompt (any prompt containing `@VARIABLES` like `@HISTORY` or `@CURRENT_STEP`)
+controls its own context: the resolved template is the whole prompt, and nothing is added around
+it.
+
+Because of that, **sequential works differently for advanced columns**: there is no running
+conversation with the judge. Chaining happens only through `@METRIC_PREVIOUS_RESULT`, which
+resolves to the previous item's result of the same metric — put it in your template where you
+want the judge to see it. If your template doesn't reference it, an advanced sequential column
+behaves exactly like batch.
+
+## Output types
+
+`score` (0–1 with a pass/fail threshold), `number`, `boolean`, `text`, or `json` — your own
+schema, built in the Add Column form. Enum fields are enforced on the model, and a numeric
+`score` field in your schema drives the pass/fail verdict via the threshold.
+
+## Decision models (TypeSafe Jev)
+
+Pick **TypeSafe Jev 1.13** as a column's model and the column stops being a rubric. Jev is a
+classifier on OpenRouter's Decisions API: it reads the graded item (the same request/answer,
+transcript or step I/O an LLM judge would get, or your `@VARIABLE` template in Advanced mode) and
+answers **one question** with calibrated probabilities. You write the question and its criteria:
+
+| Question type | You define | Cell shows | Verdict |
+| --- | --- | --- | --- |
+| Binary (yes / no) | what *yes* and *no* mean | P(yes), 0–1 | PASS when P(yes) ≥ threshold (or below it, with *Pass when: No*) |
+| Multi-class (pick one) | 2–255 labels, each with an optional description | the chosen label | FAIL when the label is ticked *fail*; a label only when none are |
+| Multi-label (pick any) | 2–50 labels | every label with P ≥ threshold | FAIL when any ticked *fail* label applies |
+
+Multi-label asks one yes/no question per label, all in a single request, so each label is judged
+on its own and adding labels barely changes cost or latency.
+
+Write the question literally, one judgment per column, and name the part of the item you mean
+(`` `Agent answer` ``). Ask "Did the agent hallucinate?" with *Pass when: No* rather than inverting
+the criteria. Jev bills input tokens only, at a fraction of an LLM judge's cost, and needs a
+workspace OpenRouter key.
+
+The built-in library (Browse Library in Add Column) is written for Jev: every template is a
+question with labels, and the old JSON sub-fields (severity, detected type) became the labels
+themselves. Each keeps its score name, so existing gates and alerts that reference it keep working.
+
+## Chaining columns: Depends On and Run only when
+
+**Depends On** runs other columns first and hands their result for the same item to this one —
+as context in a basic prompt, or through `@DEPENDENCIES` in a template. Each result carries its
+`label`, `value`, `verdict` and `reason`.
+
+**Run only when** grades an item only when conditions on those results hold (all of them). A
+condition reads a column's **label** (a multi-class label, or any multi-label label), its
+**verdict** (PASS / FAIL / NONE) or its **value** (`≥`, `>`, `≤`, `<`). Items that don't match show
+**Not run**: no verdict, no model call.
+
+The cheap-first pattern: let a Jev column classify every turn, and run the expensive LLM only
+where it flagged something — explain the turns labelled `refund_cancellation`, or diagnose only
+the turns where Answer quality FAILED:
+
+```json
+{
+  "model": "openai/gpt-6-luna",
+  "output_type": "text",
+  "prompt": "Explain how the agent handled this refund request.",
+  "run_if": [{"column": "tracely.run.intent", "field": "label", "op": "in", "values": ["refund_cancellation"]}]
+}
+```
+
+A condition's column joins Depends On automatically. If it has no result for an item, the
+condition is false and the column doesn't run. The in-app assistant knows this pattern — ask it
+for "an LLM explanation only when the intent is refund".
+
+## Long items and model context
+
+Every column is checked against its model's context window before a call is made (Jev reads at
+most 32k tokens; an LLM's limit comes from OpenRouter's catalog). Nothing is truncated. An item
+that doesn't fit is either graded by the column's **fallback model** — an LLM with a larger
+context, set under *If an item exceeds the context* — or recorded as **Skipped — input too long**,
+which carries no verdict and never fails a gate. A Jev column's fallback answers the same question
+with the same options, so the column keeps one score shape.
+
+## Further reading
+
+New to this? [LLM evaluation: metrics, methods and tools](https://tracely-ai.com/llm-evaluation)
+covers the concepts behind this page — offline versus online evaluation, when a deterministic check
+beats a judge, why the evaluation *level* decides what you can catch, and how to calibrate a judge
+before you let it gate a release.

@@ -1,0 +1,356 @@
+---
+description: "Auto-instrument OpenAI, Anthropic, Gemini, LangChain, LangGraph, LiteLLM, CrewAI and Mistral — LLM tracing with zero span code in your agent."
+---
+
+import { Callout, Steps } from "nextra/components";
+
+# Automatic instrumentation
+
+The default path. Add **one line** — `tracely.init()` — and your existing OpenAI / Anthropic /
+LangChain / LiteLLM code is traced into Tracely with **no span code**: model, messages, token usage
+(including streaming), latency, tool calls, and errors are captured for you. Manual spans
+([custom spans](/instrumentation)) remain available for anything bespoke.
+
+## Install with a provider extra
+
+```bash
+pip install "tracely-ai[openai]"            # or [anthropic], [langchain], [crewai], [all]
+```
+
+Each extra pulls the matching auto-instrumentor:
+
+| Group | Extras |
+|---|---|
+| Providers | `openai` · `anthropic` · `google` · `mistral` · `bedrock` · `groq` |
+| Harnesses | `langchain` (covers LangGraph) · `llama-index` · `crewai` · `litellm` · `openrouter` (installs `langchain-openrouter`, traced via the `langchain` instrumentor) |
+| Agent SDKs | `openai-agents` · `google-adk` · `claude-agent-sdk` |
+| Drop-ins (no instrumentor) | `xai` · `openrouter-openai` · `google-genai` · `mistral-sdk` |
+| Everything | `all` — every instrumentor extra above (the four drop-in extras and `openllmetry` stay separate installs) |
+
+Tracely adopts the OpenTelemetry ecosystem rather than reinventing it: the extras install
+[OpenInference](https://github.com/Arize-ai/openinference) (Arize) packages by default;
+[OpenLLMetry](https://github.com/traceloop/openllmetry) (Traceloop) is an equivalent alternative that
+`init("auto")` also detects (`pip install "tracely-ai[openllmetry]"`). The backend ingests both
+conventions (`gen_ai.*` and `llm.*`) independently, so either works.
+
+## One-call setup
+
+<Steps>
+
+### Initialize once at startup
+
+```python
+import tracely_sdk as tracely
+
+tracely.init(
+    endpoint="http://localhost:8000",   # your Tracely API
+    api_key="tracely_dev_key",          # an ingest key
+    service_name="weather-agent",
+    env="prod",                         # prod | staging | ci | dev — the gating axis
+    instrument="auto",                  # auto-detect openai / anthropic / google / mistral / langchain
+)
+```
+
+`instrument` accepts `"auto"` (probe for the five SDKs whose presence implies intent — **openai,
+anthropic, google, mistral, langchain** — and activate their instrumentors), an explicit list like
+`["openai", "langchain"]` or a single string, or `False` (export only — use the manual API).
+Everything else — `crewai`, `llama-index`, `litellm`, `bedrock`, `groq`, and the agent SDKs — is
+deliberately opt-in via the list: a router or boto3 being importable doesn't mean you want it
+traced. `init()` is idempotent and safe to call once at startup.
+
+### Call your provider normally — no span code
+
+```python
+from openai import OpenAI
+
+client = OpenAI()
+resp = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Why is the sky blue?"}],
+)
+```
+
+That call appears in Tracely as a **GENERATION** span with the model, input/output messages, token
+counts, latency, tool calls, and (on error) `level=ERROR`. Sync, async, and streamed calls all work.
+
+</Steps>
+
+<Callout type="info">
+  **Streaming token usage.** OpenAI omits usage on streamed responses unless you ask for it — pass
+  `stream_options={"include_usage": True}` so token (and therefore cost) data isn't lost on streams.
+</Callout>
+
+## Attach run context — `tracely.trace(...)`
+
+Provider spans are created by the instrumentor, which knows nothing about Tracely. Wrap a run in
+`tracely.trace(...)` and Tracely stamps the run's `agent` / `tenant` / `conversation` / `turn` /
+`user` / `env` (plus arbitrary metadata) onto **every** span inside it — auto-captured or manual —
+via a custom span processor. No per-call plumbing.
+
+```python
+with tracely.trace(agent="weather-agent", tenant="acme", conversation="conv-1", user="u_7", env="prod", plan="pro"):
+    client.chat.completions.create(model="gpt-4o", messages=[...])   # inherits all of the above
+```
+
+`tenant` is for one codebase serving many customers / workspaces / bots: each tenant is registered
+as its own **Agent** — with its own endpoint, scenarios, CI gate, failure clusters and regression
+cases — while `agent` stays the per-span label ("supervisor", "billing") in the trace's Agent column.
+The traces list shows a conversation's agent and filters by it. Leave `tenant` unset and the run's
+`agent` is the Agent, as before.
+
+`trace()` also works as a decorator (sync or async):
+
+```python
+@tracely.trace(agent="weather-agent", conversation="conv-1")
+async def handle(request): ...
+```
+
+It sets context only — it doesn't open a span. Nested `trace()`s merge over the enclosing one.
+
+## Function-level spans — `@observe`
+
+`@observe` turns any function into a span: arguments → input, return value → output, latency, and
+exceptions (→ `level=ERROR`) captured automatically, **auto-nested** via OpenTelemetry context with
+no manual parent wiring. `as_type` sets the observation type.
+
+```python
+@tracely.observe(as_type="tool")
+def get_weather(city: str) -> dict:
+    return {"city": city, "tempF": 64}
+
+@tracely.observe(as_type="agent")
+def weather_agent(question: str) -> str:
+    client.chat.completions.create(model="gpt-4o", messages=[...])  # GENERATION (auto)
+    get_weather("SF")                                               # TOOL (@observe)
+    return client.chat.completions.create(model="gpt-4o", messages=[...]).choices[0].message.content
+
+with tracely.trace(agent="weather-agent", conversation="conv-1"):
+    weather_agent("What's the weather in SF?")
+```
+
+This yields a 4-span tree — `weather-agent` (AGENT) → `decide` (GENERATION) · `get_weather` (TOOL) ·
+`answer` (GENERATION) — all carrying the `agent`/`conversation` from the enclosing `trace()`.
+
+`as_type` ∈ `span` · `generation` · `agent` · `tool` · `skill` · `delegate` · `chain` · `retriever` ·
+`thinking` · `embedding` · `guardrail` · … (`capture_input` / `capture_output` default `True`). See
+[`sdk/examples/auto_agent.py`](https://github.com/Jwuthri/Tracely-ai/blob/master/sdk/examples/auto_agent.py).
+
+## The layers compose
+
+```
+L1  auto-instrumentors   OpenAI · Anthropic · LangChain · LiteLLM   ← default, zero span code
+L2  @observe(as_type=…)   arbitrary fns / agents / tools             ← one decorator
+L3  tracely.trace(…)      run context (agent/conversation/turn/user) ← tags flow onto every span
+L4  with tracely.llm(…)   manual spans                               ← escape hatch (custom spans)
+```
+
+All four nest into one trace via OpenTelemetry context. Use as much or as little as you need.
+
+## LangChain & LangGraph
+
+```bash
+pip install "tracely-ai[langchain]"
+```
+
+Chains, agents, and **LangGraph** graphs trace end-to-end with no manual spans — `init()`
+auto-registers the LangChain callback handler. Build agents with the current **LangChain 1.0+** API,
+`from langchain.agents import create_agent` (it replaces the deprecated `create_react_agent` and
+`create_tool_calling_agent` + `AgentExecutor`):
+
+```python
+from langchain.agents import create_agent
+agent = create_agent("openai:gpt-5.4-mini", tools=[get_order_status], system_prompt="…")
+agent.invoke({"messages": [{"role": "user", "content": "…"}]})
+```
+
+A LangGraph run nests correctly: the graph is a `CHAIN` span, each node a child `CHAIN` (its name +
+step number become the span's `step_name` / `step_id`), and the LLM calls inside are `GENERATION`
+spans — all carrying the enclosing `tracely.trace(...)` context.
+
+<Callout type="warning">
+  **LangChain + provider de-dup.** LangChain calls providers through their SDKs, so running *both*
+  the LangChain instrumentor and a provider instrumentor would double-trace those calls (two spans).
+  Under `instrument="auto"`, when the LangChain instrumentor is installed it owns the LLM spans and
+  Tracely skips the OpenAI/Anthropic instrumentors. Want both (e.g. you also make direct OpenAI
+  calls)? Pass an explicit list: `instrument=["openai", "langchain"]`.
+</Callout>
+
+## Non-patching drop-in (`wrap_openai`)
+
+Prefer not to monkey-patch globally? Wrap a client **instance** instead — only that client is traced,
+nothing global changes:
+
+```python
+from tracely_sdk.openai import OpenAI          # a pre-wrapped client
+client = OpenAI()
+client.chat.completions.create(model="gpt-4o", messages=[...])   # GENERATION span, no global patch
+
+# or wrap one you already built / use the module import:
+from tracely_sdk.openai import wrap_openai, openai
+client = wrap_openai(OpenAI())
+openai.OpenAI().chat.completions.create(...)
+```
+
+Six providers ship a drop-in — `openai`, `anthropic`, `google`, `mistral`, plus the OpenAI-compatible
+`openrouter` and `xai` presets:
+
+```python
+from tracely_sdk.anthropic import Anthropic, wrap_anthropic
+from tracely_sdk.google import Client as Gemini          # google-genai
+from tracely_sdk.mistral import Mistral
+from tracely_sdk.xai import Grok                         # base_url preset to api.x.ai
+```
+
+All of them emit the same attributes as the manual `llm()` helper, so they inherit
+`tracely.trace(...)` and map identically. Non-streaming sync + async calls capture model · messages ·
+output · usage · tool calls; for full streaming capture, prefer the instrumentor path above. The
+full surface is in the [API reference](/api-reference#tracely_sdkprovider--non-patching-drop-ins).
+
+## OpenRouter & other OpenAI-compatible gateways
+
+OpenRouter routes one API to 100+ models, and needs no special instrumentor. The recommended path is
+LangChain's first-party **`ChatOpenRouter`** (`langchain-openrouter`) inside `create_agent`, traced by
+the LangChain instrumentor:
+
+```python
+from langchain.agents import create_agent
+from langchain_openrouter import ChatOpenRouter   # pip install langchain-openrouter
+agent = create_agent(ChatOpenRouter(model="anthropic/claude-3.5-sonnet"), tools=[...], system_prompt="…")
+```
+
+OpenRouter is also OpenAI-wire-compatible, so pointing the OpenAI SDK at its `base_url` works too —
+traced by the **OpenAI instrumentor**:
+
+```python
+client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ["OPENROUTER_API_KEY"])
+client.chat.completions.create(model="anthropic/claude-3.5-sonnet", messages=[...])   # traced
+```
+
+Either way the routed model id (`vendor/model`) flows into `model_id`, and cost is derived from it
+(the rate table matches on substring, so `openai/gpt-4o` → gpt-4o pricing).
+
+## Agent frameworks — first-party SDKs
+
+The big labs ship their own agent harnesses, each with an OpenInference instrumentor that
+`init(instrument=[...])` activates (emitting AGENT/TOOL/LLM spans into Tracely):
+
+| Framework | `instrument=` | Extra (+ SDK) |
+|---|---|---|
+| OpenAI Agents SDK (`agents`) | `["openai-agents"]` | `[openai-agents]` + `openai-agents` |
+| Anthropic Claude Agent SDK | `["claude-agent-sdk"]` | `[claude-agent-sdk]` + `claude-agent-sdk` |
+| Google ADK (`google.adk`) | `["google-adk"]` | `[google-adk]` + `google-adk` |
+
+```python
+tracely.init(instrument=["openai-agents"])      # then use the SDK normally — runs are traced
+from agents import Agent, Runner, function_tool
+```
+
+<Callout type="info">
+  **Google ADK** patches at import time, so `init(instrument=["google-adk"])` must run **before** you
+  `import google.adk`. The **Claude Agent SDK** needs the Claude Code CLI installed and is async-only.
+</Callout>
+
+## LiteLLM — 100+ providers through one path
+
+LiteLLM is opt-in (it's a router, not a provider SDK):
+
+```python
+tracely.init(instrument=["litellm"])     # wires litellm.callbacks = ["otel"]
+```
+
+<Callout type="warning">
+  **Avoid double-instrumentation.** A call traced by *both* a provider instrumentor and LiteLLM's
+  OTel callback would appear twice. `init()` activates one path per provider, and `"auto"` excludes
+  LiteLLM for this reason. If you run both deliberately, disable the overlap with
+  `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS`.
+</Callout>
+
+## Other harnesses — CrewAI & LlamaIndex
+
+Both have OpenInference instrumentors. They are **not** part of `"auto"` — name them explicitly:
+
+```bash
+pip install "tracely-ai[crewai]"        # or [llama-index]
+```
+
+```python
+tracely.init(instrument=["crewai"])     # or ["llama-index"]
+```
+
+CrewAI crews trace as AGENT + TOOL spans per crew member; LlamaIndex query engines trace their
+retrieval and synthesis steps. The same de-dup rule as LangChain applies — if the harness owns the
+LLM call, don't also enable the provider instrumentor.
+
+## Anything else — TypeScript, Go, and frameworks with no Tracely extra
+
+The SDK is the ergonomic path, not the only one. **Tracely reads the conventions, not the
+libraries** — so any tracer that already speaks one of them lands as a first-class trace with no
+Tracely code at all. Point its OTLP exporter at `{endpoint}/v1/traces` with
+`Authorization: Bearer <ingest-key>` and you're done.
+
+| What you emit | Recognised as |
+|---|---|
+| **OpenInference** (`openinference.span.kind`, `llm.*`) | span type, model, tokens, messages, tool calls |
+| **OTel GenAI semconv** (`gen_ai.*`) — attributes *or* the event form (`gen_ai.user.message`, `gen_ai.choice`) | span type, model, tokens, messages, agent name, conversation id |
+| **OpenLLMetry / Traceloop** — flattened `gen_ai.prompt.<i>.*` and `@workflow`/`@task`/`@agent`/`@tool` decorators (`traceloop.*`) | span type, model, tokens, messages |
+| **Vercel AI SDK** `experimental_telemetry` (`ai.*`) | generations, tool calls with args + results, model, tokens |
+| **LiteLLM** callback blobs (`llm.openai.*`) | model, tokens, messages |
+
+That table is what makes the **TypeScript** story work today: turn on the Vercel AI SDK's
+`experimental_telemetry`, export OTLP to Tracely, and `ai.generateText` / `ai.toolCall` spans
+render as generations and tool calls — same conversation view, same evaluators, same gate.
+
+```ts
+const result = await generateText({
+  model: openai("gpt-4o"),
+  prompt: "Summarize this ticket",
+  experimental_telemetry: { isEnabled: true },
+});
+```
+
+Two attributes are worth adding by hand whichever stack you're on, because they are what turns a
+pile of spans into a *conversation*: `tracely.conversation.id` (or the semconv
+`gen_ai.conversation.id`) to thread turns together, and `tracely.agent.id` to name the agent the
+gate and the failure clusters group by (the Python SDK sets it from `service_name` / `agent=`; raw
+OTLP must send it). The agent is the one thing Tracely never infers — a framework's own
+`gen_ai.agent.name` names every sub-agent it spins up, so reading it would fill your registry with
+agents you never chose. Unnamed traces land under a single `default` agent. Everything else is
+inferred.
+
+Failures need no special handling: an ERROR span status, a recorded `exception` event, or an
+`error.type` attribute all mark the span failed — which is the signal detection, clustering and
+the CI gate key off.
+
+The full attribute list is in the [API reference](/api-reference#what-tracely-reads).
+
+## Redacting sensitive data
+
+For regulated data this is the adoption gate, so it's built in. Redaction happens **at export** —
+the one point every span passes through — which means it covers your own `set_io` payloads *and* the
+prompts and completions the auto-instrumentors captured without you writing any span code.
+
+```python
+tracely.init(redact=True)                        # built-in PII patterns
+tracely.init(redact=[r"ORD-\d+", r"acct_\w+"])   # your own regexes → [REDACTED]
+tracely.init(redact=lambda key, value: scrub(value))
+```
+
+`True` covers email, phone, SSN, and credit-card-shaped digit runs. Off by default, and it has to be
+set on the **first** `init()` call — the exporter is built once and reused.
+
+## Threads
+
+Auto-nesting is in-process (contextvar-based). To trace work on another thread, copy the context so
+its spans nest correctly:
+
+```python
+th = tracely.run_in_thread(do_work, arg)   # inherits the current span + trace() context
+th.join()
+result = th.result
+```
+
+## What's next
+
+- [Custom spans](/instrumentation) — the manual API: retrievers, embeddings, guardrails, thinking,
+  handoffs, multimodal content. The escape hatch for anything the auto path doesn't cover.
+- [Core concepts](/concepts) — observation types and how runs thread into conversations.

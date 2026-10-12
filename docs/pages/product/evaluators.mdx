@@ -1,0 +1,65 @@
+---
+description: "Tracely evaluators: the structural checks and LLM-judge rubrics that grade every new run. Create, edit, switch off and delete them in one list, and turn any of them into an alert in one click."
+---
+
+import { Callout } from "nextra/components";
+
+# Evaluators
+
+**Failures → Evaluators.** Every check that grades your agent, in one list.
+
+<img className="screenshot" src="/screenshots/evaluators.png" alt="The Evaluators list: each evaluator with its kind, level, on/off toggle, Alert on fail, Edit and delete" />
+
+An evaluator is a **column** on the [Traces table](/product/traces#evaluator-columns--the-grades): every
+new trace is scored by every enabled evaluator a few seconds after ingest. This page is the same set
+of columns, managed without opening a grid first.
+
+## What a verdict does
+
+A run **fails** iff some **non-advisory** evaluator scored it `FAIL`. That one rule drives everything
+downstream:
+
+- the red/green badge on the Traces table and the dashboard,
+- [failure clustering](/product/clusters) — only failed runs are clustered into issues,
+- [regression cases](/product/cases), which are promoted from those failures and replayed by the
+  [CI gate](/product/gates),
+- the *Conversation failed* and *FAIL rate* triggers in [Alerts](/product/alerts).
+
+Mark an evaluator **advisory** to keep its score visible without letting it fail a run.
+
+## Kinds and levels
+
+| Kind | How it grades | Cost |
+|---|---|---|
+| **Check** (structural) | Deterministic, computed from the spans: run outcome, tool success, tool consistency, latency budget, required tools. | Free |
+| **LLM judge** | A rubric graded by a model on the workspace's own OpenRouter key ([Settings → API keys](/product/settings#api-keys)). | Your tokens; capped by **sampling** |
+
+The level says what one score is about: **Conversation** (the whole thread), **Message** (one
+request/answer) or **Step** (each tool call, generation or hand-off inside a message).
+
+## Managing evaluators
+
+- **+ New evaluator** opens the editor: start from the template library, write the rubric yourself, or
+  describe the metric and let the model draft it. Every field is documented under
+  [Add Column](/product/traces#add-column) — it is the same editor.
+- **Edit** (or click the name) reopens it with the current configuration.
+- The **toggle** stops an evaluator from grading new runs without deleting it or its past scores.
+- **✕** deletes it; its column disappears from the Traces table. Deleting needs a signed-in account —
+  an ingest key can send and read traces but never remove what people built.
+
+<Callout type="info">
+  Changing an evaluator grades **new** runs only. To re-score history, re-run the column from its
+  header on the Traces table.
+</Callout>
+
+## Alert on fail
+
+**Alert on fail** opens a new [alert](/product/alerts) already wired up: trigger *Conversation failed*,
+scoped to this evaluator, with a Slack step. Paste a Slack webhook URL (or swap the step for email or a
+webhook) and save. Use it for the evaluators you would want to hear about at 3 a.m. — a PII or policy
+judge, a tool-choice check — and leave the rest to the dashboard.
+
+## Trusting a judge
+
+Before an LLM judge blocks merges, check it against yourself on [Judge calibration](/product/calibration):
+grade a sample blind and see how often the judge agrees, and whether it misses failures or over-flags.

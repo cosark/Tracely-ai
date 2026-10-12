@@ -1,0 +1,61 @@
+---
+description: "CI gates in the app: what a gate run checks (regression cases and scenarios), the statuses PASS / FAIL / NO_COVERAGE / UNGRADED, soft warnings on latency and tokens, and running a gate from the UI or from CI."
+---
+
+import { Callout } from "nextra/components";
+
+# CI gates
+
+A gate is one verdict on one agent for one candidate build: *does every promoted production failure stay fixed, and does every enabled scenario still pass?* It runs in CI through the GitHub Action and the [CLI](/cli); this page is where the runs live.
+
+<img className="screenshot" src="/screenshots/gates.png" alt="The CI gates list" />
+
+## The list
+
+Per run: the **result**, the agent, the environment and git ref / PR it was about, **passed / failed / skipped** counts, and any soft warnings.
+
+## Run gate
+
+<img className="screenshot" src="/screenshots/run-gate.png" alt="The Run gate control: agent picker and the Run gate button" />
+
+Pick the **agent to gate** (the picker is ranked by how many promoted cases each agent has; the line under the button says what will run — *1 case · 2 scenarios*) and click **Run gate**. The run starts immediately and the list refreshes as it finishes. Cases are evaluated against the latest `env=ci` traces for that agent (a CI run is matched to its case by the digest of the input, or paired explicitly by `tracely replay`); scenarios are driven at the registered endpoint.
+
+## A gate run
+
+<img className="screenshot" src="/screenshots/gate-detail.png" alt="A gate run: status banner, warnings, per-case verdicts" />
+
+- **Status banner** —
+
+  | Status | Meaning |
+  |---|---|
+  | **PASS** | every case and scenario passed |
+  | **FAIL** | at least one production failure recurred, or a scenario failed |
+  | **NO_COVERAGE** | no candidate trace matched a case — the gate could not check anything, and says so instead of going green |
+  | **INCOMPLETE** | a case ran but could not be fully checked: a required judge returned no result (no LLM key, judge disabled) or the recorded replay did not complete. Nothing failed, nothing was shown to pass |
+  | **UNGRADED** | a conversation produced no gradeable scores |
+
+  `NO_COVERAGE`, `INCOMPLETE` and `UNGRADED` block the merge exactly like `FAIL`: an empty or half-checked gate is not a passed gate.
+
+  Each run records its **execution manifest**: the run id that produced the candidates (every trace the CLI emitted is stamped with it), the execution mode, and per case the pairing strategy — `run` (this execution's trace, the only pairing that verifies a candidate), `explicit-unscoped`, or `digest-fallback` (the latest trace with the same input, used when no run id was supplied; the run carries a warning). A candidate that is not this run's, has a different input, was not found, or whose command failed is `INCOMPLETE` with that reason.
+
+  Every case verdict is built from named **checks** — `tools`, `no_error`, and one `quality:<judge>` per judge the case was promoted from — each *required* or *advisory*, each `PASS` / `FAIL` / `UNAVAILABLE`, plus the execution evidence (mode, completed, divergence). A case is `PASS` only when every required check ran and passed under a completed execution; a required check that is unavailable makes it `INCOMPLETE`; a required `FAIL` is `FAIL`. Advisory checks stay visible and never decide. The same contract grades the manual **Replay** on a case page, so the UI, the CLI and CI cannot disagree about one candidate.
+
+- **Warnings** — the candidate's latency and token usage are compared with the last green gate for the same agent; a regression beyond 25 % is a warning. Warnings are **non-blocking** unless the gate is configured to block on them. Fail-to-pass is the only hard rule.
+- **Score drops** (scenario gates) — each [evaluator](/product/evaluators)'s mean score is compared, scenario by scenario, with the conversations of the last green gate. A drop of 0.1 or more is a warning (`score drop: goal_success -0.22 vs last green gate …`); run `tracely simulate --max-score-drop 0.1` and it fails the gate, even when every conversation passed.
+- **Cases** — one row per case: verdict, the candidate trace it was checked against (click through to the trace), and the assertion that failed.
+
+## In CI
+
+```yaml
+# .github/workflows/tracely-gate.yml — the two common shapes
+- run: tracely replay planner --entrypoint weather_agent:run   # re-run the agent on its cases, hermetically
+- run: tracely simulate --all                                   # drive every enabled scenario at the staging endpoint
+```
+
+Each command posts a commit status and a PR comment and exits non-zero on anything but `PASS`. The [CI gate CLI](/cli) page covers flags, `--env`, and the Action.
+
+<Callout type="info">
+  The gate is deliberately a *fail-to-pass* check on real production failures, not a score threshold: a release is blocked because a specific thing that broke last Tuesday would break again, and the comment on the PR names it.
+</Callout>
+
+Want it in Slack as well as on the PR — including the run that could not execute at all? [Alerts](/product/alerts) fire on `FAIL` and on `NO_COVERAGE`.

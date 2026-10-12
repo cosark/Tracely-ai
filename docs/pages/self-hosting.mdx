@@ -1,0 +1,99 @@
+---
+description: "Self-host Tracely with docker compose or one-click Railway — MIT-licensed, the same code that runs the hosted cloud."
+---
+
+import { Callout, Steps } from "nextra/components";
+
+# Self-hosting
+
+Tracely is MIT-licensed and self-hosts completely — the same code that runs the hosted cloud.
+Two paths: **one-click Railway**, or **docker compose** on a box you own.
+(Or skip all of it: [tracely-ai.com](https://tracely-ai.com) has a free plan.)
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/n5n_LE?referralCode=WCq5Cn&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
+## Docker compose (one machine, 5 minutes)
+
+```bash
+git clone https://github.com/Jwuthri/Tracely-ai && cd Tracely
+docker compose up -d --build --wait
+```
+
+That brings up everything: the API (**:8000**), the worker, the UI (**:3001**), Postgres+pgvector,
+ClickHouse, Redis and MinIO — migrations and seeding included. Open `http://localhost:3001`,
+create your workspace, grab your ingest key from **Settings → API keys**, and point the SDK at
+`http://localhost:8000`.
+
+```bash
+docker compose --profile demo up -d   # optional: populate demo traces, clusters, cases and gates
+```
+
+## Railway — one click
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/n5n_LE?referralCode=WCq5Cn&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
+The template provisions all seven services pre-wired — API, worker, UI, Postgres (pgvector),
+ClickHouse, Redis and MinIO, with volumes and private networking. Railway prompts for two secrets;
+generate each with `openssl rand -hex 32`:
+
+| Variable | What it protects |
+|---|---|
+| `SESSION_SECRET` | Signs login sessions (`AUTH_MODE=local`). |
+| `SECRETS_ENCRYPTION_KEY` | Encrypts each workspace's OpenRouter key and scenario endpoint tokens at rest. Without it those forms refuse to save rather than storing plaintext. |
+
+The backend's pre-deploy chain runs ClickHouse DDL → Alembic → seeding → S3 bucket creation before
+traffic cuts over. When it's green, open the frontend's domain, create your workspace, and grab
+your ingest key from **Settings → API keys**.
+
+<Callout type="info">
+  On the very first deploy the worker may restart a couple of times while the backend creates the
+  schema. That's expected and self-heals.
+</Callout>
+
+## Railway — wiring it by hand
+
+Prefer to build it service by service (or adapt the topology)? Everything the template serializes
+is checked into the repo as config-as-code — Dockerfile, start command, health check and the
+migration pre-deploy chain per service.
+
+<Steps>
+
+### Add the four databases
+
+**New → Template**: Postgres-with-pgvector, ClickHouse, Redis, MinIO. Each gets a persistent
+volume automatically; keep them all private.
+
+### Add the three app services
+
+**New → GitHub Repo** (a fork of `Jwuthri/Tracely-ai`) three times, setting each service's
+config-as-code path: `deploy/railway/backend.json`, `deploy/railway/worker.json`,
+`deploy/railway/frontend.json`. Give **backend** and **frontend** public domains; leave the
+worker private.
+
+### Paste the variables
+
+Every variable — including the `${{Service.VAR}}` cross-references — is pre-written in
+[`deploy/railway/.env.railway.example`](https://github.com/Jwuthri/Tracely-ai/blob/master/deploy/railway/.env.railway.example).
+Generate two secrets with `openssl rand -hex 32`: `SESSION_SECRET` (login) and
+`SECRETS_ENCRYPTION_KEY` (encrypts each workspace's OpenRouter key and scenario endpoint tokens
+at rest).
+
+### Deploy
+
+Railway builds on push; the backend's pre-deploy chain runs ClickHouse DDL → Alembic → seeding →
+S3 bucket creation before traffic cuts over. Open the frontend's public domain, create your
+workspace, and point the SDK at the backend's public domain.
+
+</Steps>
+
+The full walkthrough — IPv6 binding gotchas, private networking, scaling the worker, re-publishing
+the template — lives in
+[`deploy/railway/README.md`](https://github.com/Jwuthri/Tracely-ai/blob/master/deploy/railway/README.md);
+the production-hardening runbook (auth guards, backups, post-deploy verification) is
+[`guides/DEPLOY.md`](https://github.com/Jwuthri/Tracely-ai/blob/master/guides/DEPLOY.md).
+
+<Callout type="info">
+  **LLM judges on self-host.** Each workspace brings its own OpenRouter key (**Settings →
+  OpenRouter key**), encrypted with your `SECRETS_ENCRYPTION_KEY`. No key = structural checks
+  still run; the LLM judges, failure analysis and summaries switch off gracefully.
+</Callout>

@@ -1,0 +1,204 @@
+---
+description: "Manual instrumentation with explicit context managers when auto-instrumentation isn't enough — custom spans, tool calls, retrievals and annotations."
+---
+
+import { Callout } from "nextra/components";
+
+# Custom spans (manual instrumentation)
+
+<Callout type="info">
+  The default path is [Automatic instrumentation](/automatic) — `tracely.init()` traces your
+  OpenAI/Anthropic/… calls with no span code. This page is the **escape hatch**: explicit context
+  managers for anything the auto path doesn't cover (custom retrievers, guardrails, reasoning steps,
+  multimodal I/O). It composes with the auto path — manual spans nest into the same trace.
+</Callout>
+
+A cookbook of every helper, with realistic snippets. All of these are exercised end-to-end in
+[`sdk/examples/seed_conversations.py`](https://github.com/Jwuthri/Tracely-ai/blob/master/sdk/examples/seed_conversations.py).
+
+## The run root — `agent(...)`
+
+The root of a turn. Put the user-facing message in `set_io`; tag the run with `user` and a human
+`trace_name`.
+
+```python
+with tracely.agent("support-agent", version="v4", conversation="conv-1", turn=0,
+                   user="u_7741", trace_name="docs Q&A") as a:
+    tracely.set_io(a, input={"role": "user", "content": [{"type": "text", "text": question}]},
+                      output={"role": "assistant", "content": [{"type": "text", "text": answer}]})
+```
+
+`version` is auto-registered into the agent registry — it's what the regression gate pins to.
+
+## Generations — `llm(...)`
+
+Sampling parameters become `gen_ai.request.*` (shown in the generation's Metadata). `metadata`
+attaches arbitrary tags. `tool_calls` records the tools the model **requested** this turn.
+
+```python
+with tracely.llm("gpt-4o", agent="support-agent",
+                 temperature=0.7, top_p=1.0, max_tokens=1024, seed=7,
+                 tool_calls=["get_weather"],            # requested (even if it never runs)
+                 metadata={"prompt_version": "v3", "tenant": "acme"}) as g:
+    tracely.set_io(g, input=messages, output={"role": "assistant", "content": answer,
+                                              "finish_reason": "stop"})
+    tracely.set_usage(g, input_tokens=760, output_tokens=88, thinking_tokens=40)
+```
+
+<Callout type="info">
+  **Input** is best as a bare message array (`[{"role","content"}]`) so it renders as a transcript.
+  **Output** is the completion message object the chat API returns — or a dict (an output-schema
+  result), emitted as-is.
+</Callout>
+
+## Tools — `tool(...)`
+
+Mark a failed tool with `error(...)` — that's *the* failure-detection signal.
+
+```python
+with tracely.tool("get_charges", agent="billing-agent") as t:
+    tracely.set_io(t, input={"order_id": "ORD-4471"})
+    try:
+        tracely.set_io(t, output=charges_api(order_id))
+    except Exception as e:
+        tracely.error(t, f"billing upstream timeout: {e}")   # level=ERROR
+```
+
+A model that **requests** a tool that never runs is a *silent failure* — record the request with
+`llm(tool_calls=[...])` and simply don't emit the `tool(...)` span.
+
+## Skills — `skill(...)`
+
+A named capability between a tool and an agent — a refund flow, an escalation playbook, a loaded
+agent-skill file — with its own tools and generations nested inside:
+
+```python
+with tracely.skill("refund-flow", agent="billing-agent", version="v2") as sk:
+    tracely.set_io(sk, input={"order_id": "ORD-4471"}, output={"refunded": True})
+    with tracely.tool("issue_refund", agent="billing-agent"):
+        ...
+```
+
+`version` is recorded as `tracely.metadata.skill_version` — when the same skill starts failing, it's
+the field that tells you which revision changed.
+
+## Handovers — `delegate(...)`
+
+The *act* of routing work to another agent. Open the callee's `agent(...)` inside it and the span
+brackets everything that agent did for this one job:
+
+```python
+with tracely.delegate("billing-agent", agent="router", task="issue refund") as d:
+    tracely.set_io(d, input={"reason": "user asked for a refund"}, output=result)
+    with tracely.agent("billing-agent", role="specialist", conversation="conv-1"):
+        ...
+```
+
+It records the same handoff edge as `agent(handoff_from=...)`, so the multi-agent graph is drawn
+either way. What it adds is a gradeable span for the *routing decision* — "was billing the right
+agent for this?" is a different question from "did billing do it well?", and a step-level judge can
+now answer them separately.
+
+## Reasoning — `thinking(...)`
+
+Chain-of-thought as its own span, with reasoning-token usage:
+
+```python
+with tracely.thinking(agent="support-agent", model="gpt-4o") as th:
+    tracely.set_io(th, output={"role": "thinking", "content": "Plan: search docs, then answer."})
+    tracely.set_usage(th, thinking_tokens=120)
+```
+
+## RAG: `guardrail` → `embedding` → `retriever`, grouped in a `chain`
+
+```python
+tracely.set_io  # (set on the agent root, omitted here)
+with tracely.guardrail("input_guardrail", agent="support-agent") as gr:
+    tracely.set_io(gr, input=question, output={"action": "allow", "flags": []})
+
+with tracely.chain("rag_pipeline", agent="support-agent"):     # groups the retrieval sub-steps
+    with tracely.embedding("text-embedding-3-small", agent="support-agent") as e:
+        tracely.set_io(e, input=question, output={"dims": 1536})
+        tracely.set_usage(e, input_tokens=12)
+    with tracely.retriever("search_docs", agent="support-agent") as r:
+        tracely.set_io(r, input={"query": question, "top_k": 3}, output={"hits": hits})
+        tracely.set_metadata(r, vector_store="pgvector")
+```
+
+A **blocked** guardrail just records `{"action": "block", "flags": [...]}` and the agent returns a
+safe refusal.
+
+## Metadata — `set_metadata(...)`
+
+Arbitrary tags on any span (`tracely.metadata.<key>`), surfaced in the span panel and searchable:
+
+```python
+tracely.set_metadata(span, tenant="acme", prompt_version="v3", feature_flag="rag_v2")
+```
+
+## The agent catalog — `trace(agents=…)` / `set_agents(...)`
+
+Tracing shows which agents *fired*; the catalog declares which agents (and tools, prompts, models)
+*exist*. It fills the **Conversation Agents** panel with your real setup and is readable from
+evaluator prompts as `@AGENTS`:
+
+```python
+AGENTS = [
+    {
+        "name": "support",
+        "description": "front-line agent; routes billing questions",
+        "system_prompt": "You are the support agent for Acme…",   # free-form keys kept verbatim
+        "model": "gpt-5.2",
+        "tools": {
+            "lookup_order": {"name": "lookup_order", "description": "order by id",
+                             "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}}},
+        },
+    },
+]
+
+with tracely.trace(agent="support", conversation="conv-1", agents=AGENTS):
+    ...
+```
+
+Full shape, the HTTP alternative for non-Python services, and how the observed fallback works:
+[`set_agents` in the API reference](/api-reference#set_agentsspan-agents--the-agent-catalog).
+
+## Shared state — `set_state(...)`
+
+Record the state channels a step **wrote** (a LangGraph-style delta, a scratchpad update); the UI
+folds them into the **Conversation State** drawer and the per-message **State Δ** column:
+
+```python
+@tracely.observe(as_type="tool")
+def add_to_cart(item: str):
+    cart.append(item)
+    tracely.set_state({"cart": cart, "last_action": "add_to_cart"})
+```
+
+LangGraph needs no code — node outputs are captured as state deltas automatically. Details:
+[`set_state` in the API reference](/api-reference#set_statedelta-spannone--max_bytes4096--shared-state).
+
+## Multimodal input
+
+Build content blocks — text + image + file — in one user message:
+
+```python
+user_msg = {"role": "user", "content": [
+    {"type": "text", "text": "My order arrived cracked — photo + receipt attached."},
+    {"type": "image_url", "image_url": {"url": "https://…/photo.jpg"}},
+    {"type": "input_file", "filename": "receipt.pdf", "url": "https://…/receipt.pdf",
+     "mime_type": "application/pdf"},
+]}
+tracely.set_io(agent_span, input=user_msg)
+```
+
+The message-level Content cell renders the text plus an image thumbnail and a file chip.
+
+## Putting it together
+
+See the fourteen scenarios in `seed_conversations.py` — single & multi-turn, multi-agent +
+handoffs, RAG, multimodal, structured output, tool error + recovery, guardrail block,
+hallucination, silent tool, and a deep-research run. Three of them are the multi-agent shapes:
+one question fanned out to five specialists (each running a named skill, one delegating again to
+a sub-agent of its own), a coding swarm that goes red→green, and a routing miss where every
+specialist is right and the routing decision is wrong. Run it with `make seed-demo`.

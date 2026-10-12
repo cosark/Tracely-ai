@@ -1,0 +1,171 @@
+---
+description: "The tracely CLI turns agent behaviour into a pull-request check: gate, simulate and replay, with a GitHub commit status and PR comment."
+---
+
+import { Callout } from "nextra/components";
+
+# CI gate CLI
+
+The `tracely` CLI (shipped with the SDK) turns an agent's behaviour into a pull-request check —
+exit `0` (PASS) / `1` (the gate said no: FAIL, NO_COVERAGE) / `2` (no verdict was reached: INCOMPLETE, ERROR, unreachable), plus a GitHub commit status + PR comment. All non-zero codes block the merge; the split says whose fault it was.
+
+```bash
+tracely simulate [<agent> | --agent a,b | --all] [--min-pass-rate 0.9] [--max-score-drop 0.1] [--timeout 900] [--github]
+tracely gate     <agent> [--env ci] [--api …] [--key …] [--pr N] [--sha …] [--github]
+tracely replay   <agent> (--entrypoint module:func | --cmd "…") [--live] [--github]
+tracely export   [--out dump.ndjson] [--limit N] [--from-ts …] [--to-ts …] [--evals]
+```
+
+## `tracely simulate`
+
+Drive each agent's enabled [scenarios](/scenarios) — multi-turn conversations — against the HTTP
+endpoint you registered for it, then gate the PR on the result.
+
+```bash
+tracely simulate support-agent                      # one agent
+tracely simulate --agent support-agent --agent planner   # a subset (or --agent support-agent,planner)
+tracely simulate --all                              # every agent that has an enabled scenario
+```
+
+**Needs no agent code in CI at all.** Tracely calls your endpoint, so this works for a TypeScript,
+Go or Ruby service exactly as it does for Python — nothing to install, import or shim.
+
+### Gating many agents at once
+
+Scenarios belong to an agent, so a multi-agent repo has a suite per agent. `--all` discovers them
+from the scenario list rather than the agent list: an agent with **no enabled scenario is skipped**,
+so switching a suite off is enough to take it out of CI, and a new agent joins the gate the day
+someone writes its first scenario — no workflow edit.
+
+Every agent gets its own gate run, but they share **one** commit status and **one** PR comment
+(GitHub keys both, so separate posts would overwrite each other — a red agent could vanish behind
+a green one that finished later). The comment leads with a roll-up table and puts each agent's
+cases in a collapsible section.
+
+The result is **worst-wins**: one red agent fails the job. `--timeout` (default 900s) is a budget
+for the whole command, not per agent, and **timing out exits non-zero** — never green.
+
+<Callout type="warning">
+  An agent with enabled scenarios but **no registered endpoint** reports `NO_COVERAGE` and blocks,
+  rather than passing a suite that never ran.
+</Callout>
+
+## `tracely gate <agent>`
+
+Gate a PR against **pre-emitted** `env=ci` traces — your CI already ran the agent and exported
+traces to Tracely. Each promoted case is matched to a candidate trace by **input digest**, the
+case's assertions are evaluated, and the run aggregates to PASS/FAIL.
+
+```bash
+tracely gate planner --env ci --github
+```
+
+## `tracely replay <agent>`
+
+Re-run the agent **on each promoted case's recorded input** (fetched from `GET /api/gate/suite`),
+emit fresh `env=ci` traces, then gate — all in one step.
+
+```bash
+# Python entrypoint, called once per case input (hermetic by default):
+PYTHONPATH=sdk/examples tracely replay planner --entrypoint weather_agent:run
+
+# or any process — it gets TRACELY_INPUT and emits its own trace:
+tracely replay planner --cmd "python my_agent.py"
+
+# --live makes real tool/LLM calls instead of serving recorded fixtures
+# --lenient keeps the legacy fall-through (a call the recording lacks runs live; reported)
+# --run-id  identity of this execution (default: minted; TRACELY_RUN_ID) — every trace is stamped
+#           with it and the gate pairs candidates ONLY within it
+# --cmd-timeout  seconds a --cmd run may take per case (default 600); a non-zero exit or a
+#           timeout is reported to the gate as a failed command → that case is INCOMPLETE,
+#           never rescued by an older trace with the same input
+```
+
+Every result is bound to **this execution**: `replay` mints a run id, stamps it on the traces it
+emits (`tracely.replay.run_id`), waits for *those* traces to be ingested (bounded polling on
+`GET /api/gate/run-traces`, no fixed sleep), and the gate refuses any candidate that was not
+produced by that run, carries a different input, or cannot be found — each an `INCOMPLETE` with
+the reason. `--entrypoint` accepts a plain function or an `async def` coroutine function
+(awaited per case); generator functions are refused. For `tracely gate` on pre-emitted traces,
+export `TRACELY_RUN_ID` around your own agent run and pass the same value (`--run-id`, or the
+env) — otherwise candidates are matched by input digest and the run carries a warning saying so.
+
+Replay is **strict** by default: a case whose recording cannot be loaded is not run — its trace is
+emitted errored so the gate fails — and a run that asks for a call the recording lacks raises
+`ReplayError` inside the agent. Each case line says what happened: `[recorded · N served]`,
+`· diverged` with the evidence beneath it, `[replay error: fixtures unavailable]`, `[lenient · …]`
+or `[live]`. `--cmd` runs are always live (fixtures are not injected into an external process).
+See [Hermetic replay](/replay) for the policy and the provider matrix.
+
+<Callout type="info">
+  **Which one?** `simulate` drives multi-turn conversations against your live endpoint — no agent
+  code in CI, any language. `replay` re-runs the *promoted regression suite* against recorded
+  fixtures — deterministic, no API keys, no model spend, but Python-importable and single-turn.
+  `gate` grades traces your CI already emitted. They answer different questions; most teams run
+  `simulate` plus one of the other two. See [Scenarios](/scenarios) and [Hermetic replay](/replay).
+</Callout>
+
+## `tracely export`
+
+Not a gate — it ships with the same CLI because it needs the same `TRACELY_API` / `TRACELY_KEY`.
+Dumps the workspace's conversations as **NDJSON**, one line per conversation, each line the full
+object (turns, per-turn steps, scores, tokens, cost).
+
+```bash
+tracely export --out dump.ndjson            # or pipe: tracely export | jq -r .thread_id
+```
+
+Streamed and paged server-side, so a workspace bigger than memory still exports. Without `--out` it
+goes to stdout and the "wrote …" line goes to stderr, keeping stdout pure NDJSON. `--limit N` caps
+the conversation count, `--from-ts`/`--to-ts` bound the trace start (ISO-8601 UTC), `--evals` also
+dumps Tracely's own internal runs. The Python equivalents are
+[`export_conversations` / `download_export`](/api-reference#export).
+
+## What gating checks
+
+A promoted case is a frozen failing run. The **hard gate** is *fail-to-pass*: the fix must not
+reproduce the failure (no error step, and any tool the model required must actually run). On top,
+**soft warnings** flag latency / token regressions versus the last green gate (non-blocking by
+default; set `gate_block_on_warnings` to make them block).
+
+`tracely simulate` adds **score drops**: each evaluator's mean score is compared, scenario by
+scenario, with the last green gate's conversations. A drop of 0.1 or more (`GATE_SCORE_DROP_WARN`)
+is a warning; `--max-score-drop 0.1` makes it fail the gate even when every conversation passed.
+Only evaluators scored 0–1 are compared, and advisory evaluators never are.
+
+## GitHub Actions
+
+Inside Actions (or with `--github`), the CLI posts a **commit status** (`tracely/regression-gate`)
+and upserts a **PR comment** with per-case results and warnings. A reusable composite action lives
+at [`.github/actions/tracely-gate/`](https://github.com/Jwuthri/Tracely-ai/tree/master/.github/actions/tracely-gate):
+
+```yaml
+# .github/workflows/tracely-gate.yml
+name: Tracely gate
+on: pull_request
+permissions: { contents: read, statuses: write, pull-requests: write }
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: your-org/tracely/.github/actions/tracely-gate@main
+        with:
+          api: ${{ secrets.TRACELY_API }}
+          key: ${{ secrets.TRACELY_KEY }}
+          web-url: ${{ secrets.TRACELY_WEB_URL }}
+          # agent: support-agent,planner   ← a subset; omit it to gate every agent with scenarios
+```
+
+No checkout, no Python setup, no agent code — the action installs the CLI and Tracely calls your
+endpoints. `mode: gate` switches it to grading CI traces you already emitted, and needs an `agent`.
+
+## Configuration
+
+Flags or environment: `TRACELY_API`, `TRACELY_KEY`, `TRACELY_AGENT` (comma-separated for
+`simulate`; `--all` overrides it), `TRACELY_GATE_ENV`, `TRACELY_WEB_URL`, `GITHUB_TOKEN`. Outside
+GitHub Actions the git ref falls back to `GIT_REF`. `--dry-run` prints the GitHub calls instead of
+sending them; `--no-github` never touches GitHub even inside Actions.
+
+A `replay --cmd "…"` subprocess inherits `TRACELY_INPUT` (the case's recorded input) plus
+`TRACELY_API`, `TRACELY_KEY` and `TRACELY_ENV` — so the command can emit its trace without
+hardcoding the endpoint or key.
